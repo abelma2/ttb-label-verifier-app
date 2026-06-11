@@ -64,9 +64,11 @@ export default function BatchClient() {
   const [page, setPage] = useState(1);
   const [announcement, setAnnouncement] = useState("");
   const [dragging, setDragging] = useState(false);
+  const [rejectedNote, setRejectedNote] = useState<string | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const appInputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const appFileSeq = useRef(0);
   const resultsRef = useRef<HTMLDivElement>(null);
 
   const running = phase === "running";
@@ -91,7 +93,18 @@ export default function BatchClient() {
 
   function addFiles(list: FileList | File[] | null) {
     if (!list) return;
-    const incoming = [...list].filter((f) => ACCEPTED_IMAGE_TYPES.includes(f.type));
+    const all = [...list];
+    const incoming = all.filter((f) => ACCEPTED_IMAGE_TYPES.includes(f.type));
+    const rejected = all.filter((f) => !ACCEPTED_IMAGE_TYPES.includes(f.type));
+    // Surface silently-dropped files (HEIC, unknown type) — a vanished label is
+    // a silent screening gap, so the operator must see it, not just an off count.
+    setRejectedNote(
+      rejected.length > 0
+        ? `${rejected.length} file(s) skipped — not a PNG, JPEG, or WebP image ` +
+            `(${rejected.slice(0, 4).map((f) => f.name).join(", ")}${rejected.length > 4 ? "…" : ""}). ` +
+            "iPhone HEIC photos must be exported as JPEG first."
+        : null,
+    );
     setFiles((prev) => {
       const seen = new Set(prev.map(fileKey));
       return [...prev, ...incoming.filter((f) => !seen.has(fileKey(f)))];
@@ -100,8 +113,12 @@ export default function BatchClient() {
 
   async function onAppFile(file: File | null) {
     if (!file) return;
+    // last-write-wins: a slow parse of a since-replaced file must not overwrite
+    // the newer selection's mapping (the banner would then credit the wrong file).
+    const seq = ++appFileSeq.current;
     setAppFileName(file.name);
-    setApps(parseApplications(await file.text(), file.name));
+    const parsed = parseApplications(await file.text(), file.name);
+    if (seq === appFileSeq.current) setApps(parsed);
   }
 
   async function handleScreen() {
@@ -109,10 +126,9 @@ export default function BatchClient() {
     const controller = new AbortController();
     abortRef.current = controller;
     setPhase("running");
-    setItems(null);
-    setRunProducts(products);
-    setElapsed(null);
-    setPage(1);
+    // Do NOT clear prior results here: cancelling a just-started run must leave
+    // the previous batch's report intact (it cost real API spend). Results are
+    // hidden while running and replaced atomically only on success below.
     setProgress({ done: 0, total: products.length, current: "starting" });
     setAnnouncement(`Screening ${products.length} products.`);
     const t0 = performance.now();
@@ -122,9 +138,13 @@ export default function BatchClient() {
       // the current run's state (Cancel -> re-Screen within the same window)
       if (abortRef.current !== controller) return;
       const secs = Math.round((performance.now() - t0) / 100) / 10;
+      // snapshot the run's products + signature together with the results, so the
+      // detail thumbnails and the staleness banner always match what was screened
+      setRunProducts(products);
       setItems(results);
       setElapsed(secs);
       setResultsSig(currentSig);
+      setPage(1);
       setPhase("done");
       const counts = { fail: 0, error: 0, needs_review: 0, pass: 0 };
       results.forEach((it) => (counts[itemKey(it) as keyof typeof counts] += 1));
@@ -156,11 +176,20 @@ export default function BatchClient() {
     }
   }
 
+  /** Stop the in-flight run only — leave every input and the previous results
+   *  untouched (the button says "Cancel", not "Clear"). The run's catch sets
+   *  phase back to idle. */
+  function handleCancel() {
+    abortRef.current?.abort();
+  }
+
   function handleClear() {
     abortRef.current?.abort();
+    abortRef.current = null; // close the same-tick window where a completing run resurrects state
     setFiles([]);
     setApps(null);
     setAppFileName(null);
+    setRejectedNote(null);
     setItems(null);
     setRunProducts([]);
     setElapsed(null);
@@ -250,6 +279,12 @@ export default function BatchClient() {
             e.target.value = "";
           }}
         />
+
+        {rejectedNote && (
+          <p role="alert" className="mt-2 rounded-lg bg-review-soft px-3 py-2 text-sm text-amber-900">
+            {rejectedNote}
+          </p>
+        )}
 
         {files.length > 0 && (
           <ul className="mt-3 flex flex-wrap gap-2">
@@ -362,7 +397,7 @@ export default function BatchClient() {
                       <td className="py-1.5">
                         {rowFor(p.label)
                           ? "matched"
-                          : p.label.toLowerCase() in mapping
+                          : Object.hasOwn(mapping, p.label.toLowerCase())
                             ? "row found but empty"
                             : "—"}
                       </td>
@@ -412,7 +447,7 @@ export default function BatchClient() {
         </button>
         <button
           type="button"
-          onClick={handleClear}
+          onClick={running ? handleCancel : handleClear}
           className="rounded-xl px-4 py-3 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-700"
         >
           {running ? "Cancel" : "Clear batch"}
@@ -446,7 +481,7 @@ export default function BatchClient() {
       )}
 
       <div ref={resultsRef} className="scroll-mt-6">
-        {items && (
+        {!running && items && (
           <section aria-label="Batch results" className="space-y-4">
             {resultsSig !== currentSig && (
               <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">

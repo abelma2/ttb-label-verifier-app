@@ -41,10 +41,17 @@ export const ERROR_SHORT: Record<string, string> = {
   empty_file: "an image file is empty",
   invalid_application: "bad application data",
   invalid_request: "bad request — try again",
+  unknown: "service error — try again",
 };
 
 export function errorShort(kind: string | null): string {
-  return (kind && ERROR_SHORT[kind]) || "could not read image";
+  // Object.hasOwn, not `kind in`/ERROR_SHORT[kind]: a server- or platform-
+  // supplied kind like "constructor" would otherwise resolve to a Function on
+  // the prototype chain and crash the table (rendered as a React child). A
+  // neutral fallback — never "could not read image", which would blame the
+  // photo for a server/transport failure (the error-attribution principle).
+  if (kind && Object.hasOwn(ERROR_SHORT, kind)) return ERROR_SHORT[kind];
+  return "verification failed — try again";
 }
 
 export interface BatchItem {

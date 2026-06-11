@@ -185,6 +185,16 @@ test("products named after Object.prototype members don't hit the prototype chai
   assert.ok(appRowFor(mapping, "constructor"));
 });
 
+test("a product named __proto__ is stored as a real row, not prototype pollution", () => {
+  const { mapping } = parseApplications(
+    "product,brand_name\n__proto__,Evil\noldtom,Old Tom\n", "apps.csv");
+  // both rows present and counted; the __proto__ row is a real, matchable product
+  assert.deepEqual(Object.keys(mapping).sort(), ["__proto__", "oldtom"]);
+  assert.equal(appRowFor(mapping, "__proto__")?.brand_name, "Evil");
+  // and no prototype was polluted: a normal key inherits nothing
+  assert.equal(appRowFor(mapping, "oldtom")?.brand_name, "Old Tom");
+});
+
 test("mid-field quotes are literal, matching Python's csv reader", () => {
   const grid = parseCsv('product,brand_name\na,BRAND "X" WHISKEY\n');
   assert.equal(grid[1][1], 'BRAND "X" WHISKEY');

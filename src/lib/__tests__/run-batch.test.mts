@@ -137,8 +137,13 @@ test("progress reports done/total as items complete", async () => {
   assert.deepEqual(seen.sort(), [1, 2]);
 });
 
-test("errorShort falls back to a neutral read message for unknown kinds", () => {
-  assert.equal(errorShort("unknown"), "could not read image");
-  assert.equal(errorShort(null), "could not read image");
+test("errorShort: neutral fallback that never photo-blames, proto-chain-safe", () => {
+  assert.equal(errorShort("unknown"), "service error — try again");
   assert.equal(errorShort("file_too_large"), "an image is too large");
+  // an unmapped kind gets a neutral message, NOT "could not read image"
+  assert.equal(errorShort("some_future_kind"), "verification failed — try again");
+  assert.equal(errorShort(null), "verification failed — try again");
+  // a kind that collides with an Object.prototype member returns a string, not a Function
+  assert.equal(errorShort("constructor"), "verification failed — try again");
+  assert.equal(errorShort("toString"), "verification failed — try again");
 });

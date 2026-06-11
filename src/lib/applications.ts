@@ -170,7 +170,11 @@ export function parseApplications(rawText: string, filename: string): ParsedAppl
       Object.fromEntries(Object.entries(row).map(([k, v]) => [normHeader(k), v])),
     );
 
-    const mapping: Record<string, AppRow> = {};
+    // Object.create(null): a product literally named "__proto__" (reachable
+    // from a file like __proto___front.jpg) would otherwise hit the prototype
+    // setter — silently dropping the row and polluting the object. A null-proto
+    // map stores it as a plain own key and makes every `in`/bracket read safe.
+    const mapping: Record<string, AppRow> = Object.create(null);
     const dups: string[] = [];
     for (const row of rows) {
       const prod = pyStr(row.product).trim();

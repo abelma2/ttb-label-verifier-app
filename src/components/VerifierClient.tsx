@@ -27,15 +27,20 @@ export default function VerifierClient() {
   const [announcement, setAnnouncement] = useState("");
   const [prefill, setPrefill] = useState<{ name: string; parsed: ParsedApplications } | null>(null);
   const [prefillMessage, setPrefillMessage] = useState<string | null>(null);
+  const [resultSig, setResultSig] = useState<string | null>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const prefillInputRef = useRef<HTMLInputElement>(null);
+  const prefillSeq = useRef(0);
 
-  // Re-run the prefill match whenever the parsed file OR the front image
-  // changes (mirrors app.py's `file_id|stem` gate — fixed there after a review
-  // finding: matching only at file-selection time left the form permanently
-  // unfilled when the file arrived before the image, and silently kept product
-  // A's values after the image was swapped to product B).
+  const verifying = phase === "verifying";
+  const appValues = cleanApplication(application);
+  const frontStem = front ? stem(front.name) : null;
+
+  // Re-run the prefill match when the parsed file or the front image's STEM
+  // changes — keyed on the stem string, NOT the File object, so a same-stem
+  // retake (or re-picking the same file, which is a new File object) does NOT
+  // re-spread the row and silently revert the user's manual edits to the form.
   useEffect(() => {
     if (!prefill) return;
     const { mapping, error, warnings } = prefill.parsed;
@@ -43,16 +48,22 @@ export default function VerifierClient() {
       setPrefillMessage(`Could not use the application file (${error}).`);
       return;
     }
-    const { row, message } = pickApplicationRow(mapping, front ? stem(front.name) : null);
+    const { row, message } = pickApplicationRow(mapping, frontStem);
     if (row) {
       setApplication((prev) => ({ ...prev, ...row }));
     }
     const warningText = warnings.length > 0 ? ` ${warnings.join("; ")}.` : "";
     setPrefillMessage(`Application file: ${message}.${warningText}`);
-  }, [prefill, front]);
+  }, [prefill, frontStem]);
 
-  const verifying = phase === "verifying";
-  const appValues = cleanApplication(application);
+  // Signature of the inputs a shown verdict was computed from. When the current
+  // inputs drift from it, the result is stale — a reviewer must never read an
+  // old verdict against a swapped image or edited application value.
+  const inputSig = JSON.stringify({
+    front: front ? `${front.name}|${front.size}|${front.lastModified}` : null,
+    back: back ? `${back.name}|${back.size}|${back.lastModified}` : null,
+    app: appValues,
+  });
 
   async function handleVerify() {
     if (!front || verifying) return;
@@ -67,6 +78,7 @@ export default function VerifierClient() {
       // a late completion after Start over / a newer verify must not clobber state
       if (abortRef.current !== controller) return;
       setResult(response);
+      setResultSig(inputSig); // remember which inputs this verdict came from
       setPhase("done");
       setAnnouncement(
         `Verification complete: ${OVERALL_ANNOUNCEMENT[response.overall] ?? response.overall}. ` +
@@ -97,6 +109,12 @@ export default function VerifierClient() {
     }
   }
 
+  /** Stop the in-flight verify only — leave the images and form intact (the
+   *  button says "Cancel", not "Start over"). The verify catch sets phase idle. */
+  function handleCancel() {
+    abortRef.current?.abort();
+  }
+
   function handleReset() {
     abortRef.current?.abort();
     abortRef.current = null;
@@ -104,6 +122,7 @@ export default function VerifierClient() {
     setBack(null);
     setApplication({});
     setResult(null);
+    setResultSig(null);
     setError(null);
     setPrefill(null);
     setPrefillMessage(null);
@@ -117,7 +136,10 @@ export default function VerifierClient() {
    *  the applicant's submission, so this remains an independent comparison. */
   async function handlePrefillFile(file: File | null) {
     if (!file) return;
-    setPrefill({ name: file.name, parsed: parseApplications(await file.text(), file.name) });
+    // last-write-wins: a slow parse of a since-replaced file must not win
+    const seq = ++prefillSeq.current;
+    const parsed = parseApplications(await file.text(), file.name);
+    if (seq === prefillSeq.current) setPrefill({ name: file.name, parsed });
   }
 
   return (
@@ -225,7 +247,7 @@ export default function VerifierClient() {
         </button>
         <button
           type="button"
-          onClick={handleReset}
+          onClick={verifying ? handleCancel : handleReset}
           className="rounded-xl px-4 py-3 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-700"
         >
           {verifying ? "Cancel" : "Start over"}
@@ -260,7 +282,18 @@ export default function VerifierClient() {
           </div>
         )}
 
-        {phase === "done" && result && <ResultsView result={result} />}
+        {phase === "done" && result && (
+          <>
+            {resultSig !== null && resultSig !== inputSig && (
+              <p className="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                <span className="font-semibold">Inputs changed:</span> this result is from a
+                previous read and may not match the image(s) or application values currently
+                set above — click Verify label to refresh, or Start over.
+              </p>
+            )}
+            <ResultsView result={result} />
+          </>
+        )}
       </div>
     </div>
   );

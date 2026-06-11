@@ -12,9 +12,11 @@
 
 export const ACCEPTED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp"];
 
-/** Above this size we downscale/re-encode; well under half the body limit so a
- *  front + back pair always fits. */
-const COMPRESS_THRESHOLD_BYTES = 1_800_000;
+/** Above this size we downscale/re-encode. Sized so the MAX of 4 images per
+ *  product, each passed through untouched at this limit, still fits under the
+ *  ~4.3 MB total body cap (4 x 1.0 MB = 4.0 MB) — a 3-4 image product whose
+ *  files are individually small must not blow the total uncompressed. */
+const COMPRESS_THRESHOLD_BYTES = 1_000_000;
 /** Matches the model's high-detail input cap. */
 const MAX_DIMENSION = 2048;
 const JPEG_QUALITY = 0.9;

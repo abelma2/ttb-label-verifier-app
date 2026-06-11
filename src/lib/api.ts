@@ -41,12 +41,25 @@ export function cleanApplication(values: ApplicationData): ApplicationData | nul
 const FETCH_TIMEOUT_MS = 75_000;
 
 function deadlineSignal(external?: AbortSignal): AbortSignal | undefined {
-  const timeout =
-    typeof AbortSignal.timeout === "function" ? AbortSignal.timeout(FETCH_TIMEOUT_MS) : undefined;
-  if (external && timeout && typeof AbortSignal.any === "function") {
-    return AbortSignal.any([external, timeout]);
+  // Modern path: compose the external cancel signal with a timeout deadline.
+  if (typeof AbortSignal.timeout === "function" && typeof AbortSignal.any === "function") {
+    const timeout = AbortSignal.timeout(FETCH_TIMEOUT_MS);
+    return external ? AbortSignal.any([external, timeout]) : timeout;
   }
-  return external ?? timeout;
+  // Fallback for browsers without AbortSignal.any (Safari <17.4 / Firefox <124):
+  // a manual controller so the deadline is ALWAYS enforced — never silently
+  // dropped just because we also have an external signal to honor. (A benign
+  // timer survives a completed request; it just aborts an already-settled one.)
+  const controller = new AbortController();
+  setTimeout(
+    () => controller.abort(new DOMException("The operation timed out.", "TimeoutError")),
+    FETCH_TIMEOUT_MS,
+  );
+  if (external) {
+    if (external.aborted) controller.abort(external.reason);
+    else external.addEventListener("abort", () => controller.abort(external.reason), { once: true });
+  }
+  return controller.signal;
 }
 
 /** Mirrors the API's MAX_IMAGES so an oversized stem group fails client-side
@@ -138,10 +151,18 @@ export async function verifyImages(
         message = body.error.message;
       }
     } catch {
-      // Non-JSON error (e.g. the platform's own 413) — keep the generic message.
+      // Non-JSON error: a platform-level page (Vercel 413/502/503/504), not our
+      // JSON envelope. Map the status to the right kind so the batch table shows
+      // an accurate cause instead of blaming the photo.
       if (res.status === 413) {
         kind = "payload_too_large";
         message = "The upload was rejected as too large. Please use smaller images.";
+      } else if (res.status === 504) {
+        kind = "timeout";
+        message = "Reading the label took too long and was cancelled. Try again, or use a smaller image.";
+      } else if (res.status === 502 || res.status === 503) {
+        kind = "connection";
+        message = "The verification service is temporarily unavailable. Wait a moment and try again.";
       }
     }
     throw new VerifyError(kind, message, res.status);
