@@ -131,7 +131,9 @@ export default function VerifierClient() {
         </h2>
         <p className="mt-1 text-sm text-slate-500">
           One product per check. Add the back label too when the government warning or net
-          contents live there — both images are read together as one label.
+          contents live there — both images are read together as one label. A single flat
+          image showing front and back together works too, though separate photos keep the
+          small print (like the government warning) sharper.
         </p>
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
           <UploadSlot
