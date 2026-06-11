@@ -61,7 +61,7 @@ logger = logging.getLogger("api")
 # runs, so we enforce a slightly lower total here to own the error message; the
 # frontend downscales images client-side (to the model's effective input size)
 # so real requests stay well under both limits.
-MAX_IMAGES = 2                       # one product: front label + back/other label
+MAX_IMAGES = 4                       # one product: front + back/other (+ neck/strip labels)
 MAX_FILE_BYTES = 4 * 1024 * 1024
 MAX_TOTAL_BYTES = int(4.3 * 1024 * 1024)
 
@@ -244,8 +244,8 @@ def health() -> HealthResponse:
                504: {"model": ErrorResponse}},
 )
 async def verify_label(
-    images: list[UploadFile] = File(..., description="1–2 label images (front, and "
-                                                     "optionally back/other) of ONE product"),
+    images: list[UploadFile] = File(..., description="1–4 label images (front, back/other, "
+                                                     "neck/strip) of ONE product"),
     application: str | None = Form(None, description="Optional JSON object of the "
                                                      "applicant-submitted field values"),
 ) -> VerifyResponse:
@@ -274,4 +274,7 @@ async def verify_label(
         fields=[asdict(f) for f in result["fields"]],
         additional_statements=result["additional_statements"],
         image_quality_notes=result["image_quality_notes"],
+        # the raw coerced read: evidence for the reviewer (warning observations,
+        # evidence-only fields, full JSON readout) — never re-judged client-side
+        extracted=extracted,
     )

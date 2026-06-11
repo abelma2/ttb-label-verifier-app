@@ -110,6 +110,11 @@ def test_rules_only_happy_path(mock_extract):
     assert set(by_field) == {"brand_name", "class_type", "alcohol_content",
                              "net_contents", "name_and_address", "government_warning"}
     assert by_field["government_warning"]["status"] == "pass"
+    # the raw read travels with the verdicts (evidence panels / JSON readout)
+    extracted = body["extracted"]
+    assert extracted["brand_name"]["value"] == "OLD TOM RESERVE"
+    assert extracted["government_warning"]["header_bold"] is True
+    assert extracted["alcohol_content"]["abv_percent"] == 45.0
 
 
 def test_application_match_happy_path(mock_extract):
@@ -171,7 +176,8 @@ def test_non_image_rejected():
 
 
 def test_too_many_images_rejected():
-    files = [("images", (f"img{i}.png", PNG, "image/png")) for i in range(3)]
+    files = [("images", (f"img{i}.png", PNG, "image/png"))
+             for i in range(api_index.MAX_IMAGES + 1)]
     r = post_verify(files=files)
     assert r.status_code == 400
     assert r.json()["error"]["kind"] == "too_many_images"
@@ -205,6 +211,23 @@ def test_unknown_application_key_is_400(mock_extract):
     r = post_verify(application={"brand": "Old Tom"})
     assert r.status_code == 400
     assert r.json()["error"]["kind"] == "invalid_application"
+
+
+def test_non_string_additional_statement_kind_is_coerced(monkeypatch):
+    """Under the engine's json_object fallback, extraction._coerce passes a
+    model-emitted non-string `kind` through raw; the response models must
+    coerce it (AdditionalStatement._coerce_kind), not crash serialization
+    into a masked 500."""
+    raw = compliant_extraction()
+    raw["additional_statements"] = [
+        {"value": "CONTAINS FD&C YELLOW #5", "kind": 7, "confidence": "high"}]
+    monkeypatch.setattr(api_index, "extract_fields",
+                        lambda images, media_type="image/png": raw)
+    r = post_verify()
+    assert r.status_code == 200
+    body = r.json()
+    assert body["additional_statements"][0]["kind"] == "7"
+    assert body["extracted"]["additional_statements"][0]["kind"] == "7"
 
 
 def test_extraction_failure_maps_to_502(monkeypatch):

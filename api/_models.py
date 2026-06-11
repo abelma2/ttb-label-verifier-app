@@ -46,20 +46,6 @@ class ApplicationData(BaseModel):
         return out
 
 
-class FieldVerdict(BaseModel):
-    """Serialized verification.FieldResult.
-
-    `cause` values "absence"/"wording"/"caps"/"bold" come from the
-    government-warning check; "low_confidence" may appear on ANY field whose
-    passing read was downgraded to needs_review (verification._escalate)."""
-    field: str
-    status: Status
-    reason: str
-    extracted: str
-    expected: str
-    cause: Optional[str] = None
-
-
 class AdditionalStatement(BaseModel):
     """One transcribed conditional-disclosure statement (no pass/fail logic —
     surfaced to the reviewer, mirroring the engine's deliberate scope)."""
@@ -78,6 +64,70 @@ class AdditionalStatement(BaseModel):
         return str(v)
 
 
+class ExtractedField(BaseModel):
+    """One extracted scalar field: {present, value, confidence}. extraction._coerce
+    guarantees this shape; extras are ignored (not forbidden) so a future engine
+    field doesn't break response serialization."""
+    present: bool
+    value: Optional[str] = None
+    confidence: Confidence = "low"
+
+
+class AlcoholContentField(ExtractedField):
+    abv_percent: Optional[float] = None
+    proof: Optional[float] = None
+
+
+class GovernmentWarningField(BaseModel):
+    """The model's warning OBSERVATIONS (evidence, not judgment) — surfaced so the
+    reviewer can see what the bold/caps verdict was based on."""
+    present: bool
+    text: Optional[str] = None
+    header_all_caps: Optional[bool] = None
+    header_bold: Optional[bool] = None
+    header_bold_confidence: Confidence = "low"
+    header_bold_basis: Optional[str] = None
+    body_bold: Optional[bool] = None
+    body_bold_confidence: Confidence = "low"
+    confidence: Confidence = "low"
+
+
+class Extraction(BaseModel):
+    """The engine's coerced extraction schema (see extraction._EXTRACTION_SCHEMA).
+    Returned alongside the verdicts so the UI can show the model's raw read —
+    evidence-only fields, warning observations, and the full JSON readout —
+    exactly as the Streamlit prototype does."""
+    beverage_type: str
+    brand_name: ExtractedField
+    fanciful_name: ExtractedField
+    class_type: ExtractedField
+    statement_of_composition: ExtractedField
+    net_contents: ExtractedField
+    name_and_address: ExtractedField
+    country_of_origin: ExtractedField
+    appellation: ExtractedField
+    vintage: ExtractedField
+    sulfite_declaration: ExtractedField
+    alcohol_content: AlcoholContentField
+    government_warning: GovernmentWarningField
+    additional_statements: list[AdditionalStatement]
+    image_quality_notes: Optional[str] = None
+
+
+class FieldVerdict(BaseModel):
+    """Serialized verification.FieldResult.
+
+    `cause` values "absence"/"wording"/"caps"/"bold" come from the
+    government-warning check; "low_confidence" may appear on ANY field whose
+    passing read was downgraded to needs_review (verification._escalate)."""
+    field: str
+    status: Status
+    reason: str
+    extracted: str
+    expected: str
+    cause: Optional[str] = None
+
+
 class VerifyResponse(BaseModel):
     mode: Literal["application_match", "rules_only"]
     overall: Status
@@ -85,6 +135,7 @@ class VerifyResponse(BaseModel):
     fields: list[FieldVerdict]
     additional_statements: list[AdditionalStatement]
     image_quality_notes: Optional[str] = None
+    extracted: Extraction
 
 
 class ErrorBody(BaseModel):
