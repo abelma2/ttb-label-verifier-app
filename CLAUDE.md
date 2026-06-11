@@ -4,20 +4,42 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A prototype Streamlit app that verifies a U.S. alcohol beverage label (beer, wine, or
-distilled spirits) against the values an applicant submitted and the federal labeling
-rules (TTB / 27 CFR). It returns **pass** / **needs review** / **fail** per field plus an
-overall verdict. Two modes: **single label** (match against typed application values) and
-**batch** (screen many labels against the fixed rules).
+An app that verifies a U.S. alcohol beverage label (beer, wine, or distilled spirits)
+against the values an applicant submitted and the federal labeling rules (TTB / 27 CFR).
+It returns **pass** / **needs review** / **fail** per field plus an overall verdict. Two
+modes: **single label** (match against typed application values) and **batch** (screen
+many labels against the fixed rules).
+
+**Production is a Next.js + Vercel web app** (`src/` frontend + a thin FastAPI serverless
+function in `api/`) over a shared, UI-agnostic Python **engine** (`extraction.py`,
+`verification.py`, `config.py`). The original **Streamlit prototype (`app.py`) is legacy**
+— it still runs locally and is kept for reference, but it is excluded from deploys and is
+not the production surface. When a change affects "the app," it almost always means the
+web app (`src/` + `api/`), not `app.py`. The engine is the source of truth for all
+regulatory logic and is imported untouched by the web API, the Streamlit prototype, the
+test suite, and the eval/benchmark harnesses — so the invariants below apply no matter
+which front end calls them.
 
 ## Commands
 
 ```bash
-pip install -r requirements.txt
-streamlit run app.py                          # run the app
+# --- production web app (Next.js frontend + FastAPI serverless API) ---
+pip install -r requirements-dev.txt           # engine + API deps + dev/test tools (uvicorn, pytest, httpx)
+npm install                                    # frontend deps
+npm run dev:api                                # terminal 1: API on :8000 (uvicorn api.index:app --reload --port 8000)
+npm run dev                                     # terminal 2: frontend on :3000 (proxies /api/py/* to :8000) — open http://localhost:3000
+npm run build                                   # production Next.js build
+# Interactive API docs while dev:api runs: http://localhost:8000/api/py/docs
 
-pip install pytest && pytest                  # all unit tests (pure, no network; ~150 tests, all in tests/test_verification.py)
-pytest tests/test_verification.py::test_warning_absent_fails   # a single test
+# --- tests (pure, no network — the model call is mocked in the API tests) ---
+pytest                                         # all Python tests: engine (tests/test_verification.py, ~157) + API glue (tests/test_api.py, ~19)
+pytest tests/test_verification.py::test_warning_absent_fails   # a single engine test
+npm run test:api                               # just the API layer (= pytest tests/test_api.py -q)
+npm run test:web                               # batch grouping / application-file parsing (node:test, src/lib/__tests__/*.mts)
+
+# --- legacy Streamlit prototype (local only, not deployed) ---
+pip install -r requirements-streamlit.txt      # adds streamlit + pillow on top of requirements.txt
+streamlit run app.py
 
 # end-to-end checks that DO call the real model (need an API key, cost money):
 python scripts/smoke_test.py --group test_labels/real_labels test_labels/baseline_labels
@@ -39,10 +61,14 @@ python scripts/benchmarks/model_benchmark.py                  # cross-model accu
 ```
 
 The app needs an OpenAI **API platform** key (platform.openai.com, billing enabled —
-not a ChatGPT subscription). Provide it either way:
+not a ChatGPT subscription):
 
-- Copy `.streamlit/secrets.toml.example` to `.streamlit/secrets.toml` and paste the key, or
-- Set the env var. PowerShell: `$env:OPENAI_API_KEY = "sk-..."` (README shows the bash `export` form).
+- **Web app / engine / tests:** set the `OPENAI_API_KEY` env var (the FastAPI layer reads
+  only `os.environ`). PowerShell: `$env:OPENAI_API_KEY = "sk-..."` (README shows the bash
+  `export` form). On Vercel, set it in the project's environment variables. Other
+  env-overridable knobs: `EXTRACTION_MODEL`, `WARNING_BOLD_POLICY` (see `config.py`).
+- **Streamlit prototype only:** can additionally read the key from
+  `.streamlit/secrets.toml` (copy `.streamlit/secrets.toml.example`).
 
 Do not commit `secrets.toml` or test label images (both are gitignored).
 
@@ -62,7 +88,11 @@ core design principle — keep it intact.
    Both return `{"overall", "fields": [FieldResult], "beverage_type",
    "additional_statements", "image_quality_notes"}`.
 
-`app.py` is **UI only** — it wires the two stages and never judges: collects inputs →
+Every front end is **UI only** — it wires the two engine stages and never judges. The
+production web app does this across the browser/serverless boundary (see "The web app"
+below); the legacy `app.py` does it in one Streamlit process.
+
+`app.py` (legacy Streamlit prototype) collects inputs →
 `_extract` (→ `extract_fields`) → `verify`/`verify_label_only` → `_render_product`. Both modes accept **optional
 application data** (single: the form, typed or prefilled from an uploaded CSV/JSON file; batch:
 an uploaded CSV/JSON matched to products by filename stem). A product **with** application
@@ -72,6 +102,59 @@ label — products can share a stem) and by default groups uploaded files into p
 filename stem (`_group_uploads` / `_stem`, same `_Front`/`_Other` convention as
 `smoke_test.py`) so a front+back pair is read together instead of the front false-failing the
 warning that lives on the back. Results persist in `st.session_state`.
+
+### The web app (production front end)
+
+Next.js App Router frontend (`src/`, TypeScript + Tailwind **v3** — see below) + a **thin**
+FastAPI serverless function (`api/index.py`) over the same engine, shipped as **one Vercel
+project**. The web layer adds **no third stage**: `api/index.py` contains zero business
+logic — it validates the upload (count/size, **magic-byte sniffing**; the client's
+`Content-Type` is untrusted), validates the optional application JSON (`api/_models.py`
+Pydantic, `extra="forbid"` so a drifted payload fails loudly), orchestrates
+`extract_fields` → `verify`/`verify_label_only`, and maps `extraction.failure_kind()` to
+HTTP status + a user-facing message. **The engine invariants below are enforced here too**:
+the extractor never receives application data, and a blank/absent form runs
+`verify_label_only` and is never auto-filled (the API has no "copy extracted into the form"
+path — that single `app.py` convenience is the one deliberate non-port).
+
+- **Engine import strategy.** The engine stays at the repo root; `api/index.py` prepends
+  the root to `sys.path`. Vercel's Python builder bundles every non-excluded file into the
+  function, so the engine ships automatically — **`.vercelignore` is the mechanism that
+  scopes the deploy** (it excludes tests, fixtures, benchmarks, docs, `app.py`, and the
+  Streamlit/dev requirements). Do **not** copy the engine into `api/` (two diverging copies
+  of regulatory logic) or package it.
+- **Routing / no CORS.** The frontend always calls relative `/api/py/*`. `next.config.ts`
+  proxies that to uvicorn `:8000` in dev and rewrites it to the `api/index.py` function in
+  prod (Vercel Next.js + FastAPI hybrid pattern). Same-origin in both cases → **no CORS
+  surface by design**, not `allow_origins=["*"]`. If the API is ever split onto its own
+  host, add an explicit allow-list.
+- **Type safety end to end.** `api/_models.py` (Pydantic response models) is mirrored
+  **1:1** by `src/lib/types.ts` (TS interfaces). The response is the engine's `FieldResult`
+  contract serialized verbatim (`asdict`), plus the raw coerced `extracted` read as
+  reviewer evidence. **Change the two model files together.**
+- **Batch is client-side orchestration, not a batch endpoint.** Where Streamlit fanned out
+  over a server-side `ThreadPoolExecutor`, the browser groups files into products and issues
+  **one `/api/py/verify` request per product** (`src/lib/batch.ts`, `BATCH_CONCURRENCY = 8`
+  to match `config.BATCH_MAX_WORKERS`) — each product is its own serverless invocation, so
+  the platform scales it and one bad product becomes an error row, never a sunk batch.
+- **The grouping and application-file logic are 1:1 TypeScript ports of `app.py`** —
+  `src/lib/stem.ts` (↔ `_stem`/`_group_uploads`) and `src/lib/applications.ts` (↔
+  `_parse_applications`/`_app_row_for`/`_pick_application_row`), including Python-truthiness
+  string coercion and prototype-safe key handling. **Keep them in lockstep with `app.py`**;
+  they are pinned by `src/lib/__tests__/*.mts` (`npm run test:web`).
+- **Vercel's 4.5 MB body limit is handled client-side first.** `src/lib/image.ts`
+  downscales images over ~1 MB to ≤2048 px and re-encodes as JPEG — lossless for the model
+  (its high-detail pipeline caps input at 2048 px anyway). The API still enforces hard
+  limits (`MAX_IMAGES=4`, 4 MB/file, 4.3 MB total) with clear JSON errors so no raw
+  413/500 reaches the user. Products are capped at **4 images** (front/back/neck/strip) — a
+  consequence of the request budget that `app.py`'s single-server upload didn't have.
+- **Tailwind v3, not v4** — v4's native engine ships no 32-bit Windows binaries and the dev
+  machine runs 32-bit Node (output is identical for this UI). Don't "upgrade" it.
+- **Requirements are split by purpose:** `requirements.txt` is the lean **deploy manifest**
+  (fastapi, pydantic, python-multipart, openai, rapidfuzz — **no streamlit**);
+  `requirements-dev.txt` adds uvicorn/pytest/httpx; `requirements-streamlit.txt` adds the
+  legacy prototype's streamlit + pillow. The error-attribution principle holds in both UIs:
+  never blame the photo read for an upload-size/format/transport failure.
 
 ### Invariants worth preserving
 
@@ -246,8 +329,11 @@ are never retried and classify as `quota`, not `rate_limit`.
 
 ### Scripts & repository layout
 
-Production code is the four root modules (`app.py`, `extraction.py`, `verification.py`,
-`config.py`) plus `tests/`. Everything else is tooling:
+Production code is the **shared engine** (`extraction.py`, `verification.py`, `config.py`),
+the **web app** (`src/` Next.js frontend + `api/` FastAPI serverless function), and
+`tests/` (`test_verification.py` = engine, `test_api.py` = API glue;
+`src/lib/__tests__/*.mts` = the TS ports). `app.py` is the **legacy** Streamlit prototype
+(local only, `.vercelignore`'d). Everything else is tooling:
 
 - `scripts/` — the two dev tools: `smoke_test.py` (run the real pipeline on local images;
   the ad-hoc end-to-end harness) and `generate_adversarial.py` (regenerate the `adversarial/`
@@ -264,6 +350,11 @@ Production code is the four root modules (`app.py`, `extraction.py`, `verificati
   whether the verifier supports it (the source of the "known gap" rows); `coverage_matrix_starter.csv`
   is the unscored template. Unlike the benchmarks, this resolves ROOT with plain `os.path.dirname`,
   not `_paths`, because it sits one level down, not in `scripts/benchmarks/`.
+  `eval/results_flag_on/` and `eval/results_flag_off/` are deliberately **tracked frozen
+  snapshots** — the A/B evidence behind BENCHMARK_NOTES' "warning-crop flag stays off" verdict
+  (`run_eval.py` itself only ever writes `eval/results/`); don't archive or delete them.
+- `docs/` — `bold_research.md`, the regulatory research memo behind `WARNING_BOLD_POLICY`
+  (the legal/CFR counterpart to `BENCHMARK_NOTES.md`'s empirical findings).
 - `test_labels/` (gitignored images) is organized by purpose, and the harnesses read **leaf**
   folders: `baseline_labels/` (clean synthetic front+back pairs), `real_labels/` (photographed
   bottles), `error_labels/` (single-defect fixtures + `test_fixtures_manifest.csv`, consumed by
