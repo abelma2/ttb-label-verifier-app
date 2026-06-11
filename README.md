@@ -106,7 +106,7 @@ vercel.json           Python function config (maxDuration, includeFiles)
 | --- | --- | --- |
 | `OPENAI_API_KEY` | yes | OpenAI **API platform** key (platform.openai.com, billing enabled — not a ChatGPT subscription) |
 | `EXTRACTION_MODEL` | no | override the vision model (default `gpt-5.4-mini`, chosen by a 5× stability benchmark) |
-| `WARNING_BOLD_POLICY` | no | bold-gate policy for the government warning (default `header_body_gate`; see `config.py`) |
+| `WARNING_BOLD_POLICY` | no | bold-gate policy for the government warning (default `medium_pass_gate`; set `header_body_gate` for the stricter high-confidence-only PASS gate; see `config.py`) |
 
 Locally you can also put the key in `.streamlit/secrets.toml` (the Streamlit prototype
 reads it there); the FastAPI layer uses only `os.environ`. Never commit secrets — both
@@ -184,9 +184,11 @@ TTB's "Checklist of Mandatory Label Information" per class:
 - **Government warning** (27 CFR part 16) — exact wording; "GOVERNMENT WARNING" in caps
   **and bold**, body **not** bold; "S"/"G" in Surgeon General capitalized. Wording and
   caps are judged deterministically from the transcription; bold is confidence-gated
-  (`header_body_gate`): pass only when both bold rules are confirmed at high confidence,
-  fail on a high-confidence violation, needs-review otherwise. Font-weight detection from
-  photos is unreliable (see `BENCHMARK_NOTES.md`), so nothing uncertain ever auto-passes.
+  (`medium_pass_gate`): pass when both bold rules are confirmed at medium-or-high
+  confidence, fail only on a high-confidence violation, needs-review otherwise. Font-weight
+  detection from photos is unreliable (see `BENCHMARK_NOTES.md`), so a null/low-confidence
+  bold read never auto-passes, and a confident violation always fails. (The stricter
+  high-confidence-only PASS gate remains available: `WARNING_BOLD_POLICY=header_body_gate`.)
 - **Alcohol content** — class-dependent presence; bare "ABV" notation fails (not a TTB
   form); a proof inconsistent with the stated ABV fails.
 - **Wine appellation** — conditionally mandatory when the label shows a varietal,

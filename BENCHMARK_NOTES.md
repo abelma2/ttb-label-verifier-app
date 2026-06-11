@@ -4,18 +4,24 @@ Why this file exists: the government warning has checkable properties (presence,
 header ALL-CAPS, "Surgeon General" capitalization, and **two bold rules** — the header must be
 bold and the remainder/body may NOT be bold). The text-identity properties are read reliably from
 the transcription. **Bold is not** — and this file documents the evidence behind how it is gated.
-The production default is now `WARNING_BOLD_POLICY = "header_body_gate"` (`config.py`): a
-Pass/Review/Fail gate over BOTH bold rules that auto-passes only when both are confidently
-compliant, fails on a confident violation of either, and otherwise routes to a reviewer — see the
-"Production posture" section for how the benchmark series led here, and the Conclusion (written
-for the prior header-only `confidence_gate`) for why bold is neither ignored nor blindly trusted.
+The production default is now `WARNING_BOLD_POLICY = "medium_pass_gate"` (`config.py`, since
+**2026-06-11**): a Pass/Review/Fail gate over BOTH bold rules whose PASS gate accepts
+**medium-or-high** confidence, fails only on a HIGH-confidence violation of either rule, and
+otherwise routes to a reviewer. This is a deliberate, course-staff-sanctioned relaxation of the
+`header_body_gate` default this file's benchmark series originally selected (high-confidence-only
+PASS); the FAIL conditions are identical between the two gates, so every confident violation the
+strict gate caught still fails — the delta is that medium-confidence compliant reads PASS instead
+of reviewing, at the benchmarked cost of medium-confidence not-bold misreads passing too (see the
+`medium_pass_gate` section). See the "Production posture" section for how the benchmark series
+led to the two-rule structure, and the Conclusion (written for the prior header-only
+`confidence_gate`) for why bold is neither ignored nor blindly trusted.
 
 > **Removed 2026-06-11.** The experimental parallel warning-only specialist / crop+variant-A path
 > (`USE_PARALLEL_WARNING_CHECK`, `extract_fields_with_warning_check`) and its two benchmark scripts
 > (`warning_check_benchmark.py`, `real_backs_flag_benchmark.py`) were deleted from the codebase,
 > along with the advisory Cloud Vision object signal (`ENABLE_GOOGLE_VISION`). The sections below
 > that discuss them are retained as historical findings, not live features. Production remains
-> OpenAI-only with `WARNING_BOLD_POLICY = "header_body_gate"`.
+> OpenAI-only (the bold gate's current default is covered in the paragraph above).
 
 > **Run-artifact paths.** Sections below cite evidence files as `output/<name>` — the path where
 > the run originally landed. Superseded runs are periodically swept to `archive/old_output_runs/`
@@ -92,9 +98,11 @@ cannot be confirmed. The app does *not* ignore bold; it checks bold and fails wh
 formatting cannot be confirmed.
 
 - `WARNING_BOLD_POLICY = "confidence_gate"` (the **prior** submitted-demo default — **since
-  superseded by `header_body_gate`**, which requires **HIGH** confidence on both bold rules to
-  PASS; see "Production posture" below. The medium/high-passes behavior described next is this
-  prior header-only mode, **not** the current production gate) — `header_bold` True
+  superseded by the two-rule gates**: `header_body_gate` (HIGH-confidence-only PASS), itself
+  relaxed to `medium_pass_gate` (medium-or-high PASS, the current default since 2026-06-11);
+  see "Production posture" and the `medium_pass_gate` section below. The medium/high-passes
+  behavior described next is this prior **header-only** mode, **not** the current production
+  gate, which checks the body too) — `header_bold` True
   with medium/high confidence passes; False with medium/high confidence fails; a null read or
   low confidence fails with *"could not verify ... submit a clearer label image"* (an automated
   inability-to-verify, **not** human review).
@@ -345,14 +353,19 @@ false-fails. It is **not** enough to auto-pass bold. The all-bold-body gap needs
 that the *remainder* is not bold (cf. B4's `body_appears_bold`); confidence-tightening alone can't.
 Bold stays fail-closed / reviewer-confirmed.
 
-### Production posture — adopted the structural body-check (`header_body_gate`, new default)
+### Production posture — adopted the structural body-check (`header_body_gate`, default 2026-06-09 → 2026-06-11)
+
+> **Update 2026-06-11:** the PASS bar of this posture was relaxed to `medium_pass_gate` (the
+> current production default) per course-staff guidance — same two-rule structure, PASS accepts
+> medium-or-high confidence, FAIL conditions unchanged. The section below records the posture as
+> adopted on 2026-06-09; its structural body-check argument carries over to the relaxed gate.
 
 The benchmark series above converged on one structural finding: the old header-only
 `confidence_gate` never inspected the body weight, so it **auto-passed ~93% of all-bold-body
 violations** (the "FALSE-PASS — all-bold-body" row, and the residual high-confidence false-passes
 that high-only re-scoring could not fix). B4 showed the fix is a verifier-side body check
 (`body_appears_bold`: 0% gate false-pass), at the cost of more false-fails. The production
-default now implements exactly that, as `WARNING_BOLD_POLICY = "header_body_gate"`:
+default then implemented exactly that, as `WARNING_BOLD_POLICY = "header_body_gate"`:
 
 - **Auto-check warning wording and capitalization** deterministically (they ride on character
   identity — reliable across models). Unchanged.
@@ -369,9 +382,9 @@ default now implements exactly that, as `WARNING_BOLD_POLICY = "header_body_gate
 - `"confidence_gate"` (the prior default, header-only) and the other modes are retained for
   benchmarking and A/B comparison via the `WARNING_BOLD_POLICY` env override.
 
-### `medium_pass_gate` — does relaxing the PASS gate to MEDIUM confidence help? (tested, rejected as default)
+### `medium_pass_gate` — does relaxing the PASS gate to MEDIUM confidence help? (tested; rejected as default at the time — **promoted to default 2026-06-11** per course-staff guidance)
 
-`header_body_gate` (default) auto-PASSES only when **both** bold rules are satisfied at **HIGH**
+`header_body_gate` (the default when this was written) auto-PASSES only when **both** bold rules are satisfied at **HIGH**
 confidence; a medium-confidence-but-compliant read goes to REVIEW. That conservatism produces
 *false reviews* on clean labels (the bold read is often medium-confidence even when the label is
 fine). `medium_pass_gate` (`scripts/benchmarks/medium_pass_gate_compare.py`,
@@ -415,11 +428,17 @@ deterministically in the unit tests.)
   Production auto-PASS still requires HIGH confidence on **both** bold rules; medium confidence is
   **never** sufficient for a production PASS.
 
-**Status:** `medium_pass_gate` is kept as an **experimental, env-selectable option only**
-(`WARNING_BOLD_POLICY=medium_pass_gate`), with full truth-table unit tests (incl. a FAIL-parity test
-vs `header_body_gate`) in `tests/test_verification.py`. It is **not** wired in as the default and
-production behavior is unchanged. Reasonable to opt into only in a low-stakes context with a
-guaranteed downstream human pass (e.g. a batch pre-screen) — never as the authoritative gate.
+**Status (as originally written):** `medium_pass_gate` was kept as an **experimental,
+env-selectable option only** (`WARNING_BOLD_POLICY=medium_pass_gate`), with full truth-table unit
+tests (incl. a FAIL-parity test vs `header_body_gate`) in `tests/test_verification.py`, on the
+reasoning above — reasonable only in a low-stakes context with a guaranteed downstream human pass.
+
+> **Update 2026-06-11:** course staff advised that the bold PASS gate does not need to be as
+> strict as the high-confidence-only posture, so `medium_pass_gate` **is now the production
+> default** (`config.py`). The findings above stand unrevised — the trade (clean-label reviews
+> 4→0, not-bold false-passes 2→4 on this fixture set) is accepted, not refuted. FAIL parity with
+> `header_body_gate` is unchanged and still pinned by the unit tests; the stricter gate remains
+> one env var away (`WARNING_BOLD_POLICY=header_body_gate`).
 
 ### Crop + variant-A — the combined evidence cell (benchmark-only; best bold evidence path so far)
 
@@ -610,7 +629,7 @@ the residual unreliability is not caused by bold-priming and de-priming doesn't 
 `verification.py`'s mapping. The cleanest win (run-to-run stability) plus equal accuracy justify a
 larger, multi-model A/B (the script accepts `MINIMAL_PROMPT_MODELS`) before any decision. Net: it **validates
 the prompt-simplification hypothesis** — stop over-optimizing on bold; keep the focus on text / mandatory-field accuracy and
-Pass/Review/Fail escalation for visual formatting (which production `header_body_gate` already does) —
+Pass/Review/Fail escalation for visual formatting (which the production two-rule bold gate already does) —
 while confirming bold is inherently unreliable in *both* prompts.
 
 ### Minimal schema-compatible prompt experiment (prompt-only swap, results SEPARATED)
@@ -689,8 +708,9 @@ The **only** place k>1 helped was the secondary bold stress test: **k=2 (A+B) el
 not-bold false-pass** that one reader missed and halved verdict flips (6/21→2/21). k≥3 added nothing.
 
 **Conclusion (TA recommendation not adopted):** the best production choice is **one reader + a
-conservative Pass/Review/Fail verifier** — which is exactly what the production `header_body_gate`
-already does (route uncertain bold → review). A **two-reader fallback (A + B, same cheap model)** is
+conservative Pass/Review/Fail verifier** — which is exactly what the production two-rule bold gate
+already does (route uncertain bold → review; since 2026-06-11 medium-confidence *compliant* reads
+pass under `medium_pass_gate`). A **two-reader fallback (A + B, same cheap model)** is
 reserved for optional bold-format hardening only; **three or more readers are unnecessary** (no
 safety gain, multiplied cost/latency/review). **No production change** is warranted.
 

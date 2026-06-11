@@ -121,6 +121,13 @@ with the resolution lever; B3 is benchmark-only and **not** wired into the verdi
 auto-check wording + caps; do not auto-pass bold on model judgment; fail closed / reviewer
 confirmation when bold can't be verified.
 
+> **Update 2026-06-11:** the bold PASS gate was relaxed per course-staff guidance — production
+> now runs `WARNING_BOLD_POLICY = "medium_pass_gate"`, whose PASS accepts a **medium-or-high**
+> confidence model judgment on both bold rules (so a confident-enough model read *does*
+> auto-pass). The fail-closed core is unchanged: auto-FAIL stays reserved for high-confidence
+> violations, and unknown/low-confidence reads still route to review. See `BENCHMARK_NOTES.md`
+> (`medium_pass_gate` section) for the measured trade.
+
 ## Sources
 
 Regulatory (primary):

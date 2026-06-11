@@ -67,10 +67,11 @@ BS = os.path.join(ROOT, "bold_safety")
 BASELINE = os.path.join(ROOT, "test_labels", "clearer_baseline_labels")
 REAL = os.path.join(ROOT, "test_labels", "real_labels")
 
-# Current-production reference on THIS SAME bold_safety set (prior data, body-bold decider,
-# production full prompt + verification._check_warning). Cited in the final report, not re-run.
+# Prior-production reference (gathered under the then-default header_body_gate) on THIS SAME
+# bold_safety set (prior data, body-bold decider, production full prompt +
+# verification._check_warning). Cited in the final report, not re-run.
 PROD_REFERENCE = {
-    "model_prompt": "gpt-5.4-mini | production full extract + header_body_gate",
+    "model_prompt": "gpt-5.4-mini | full extract + header_body_gate (prior production default)",
     "boldbody_caught": "2/9 (rubber-stamps body_bold=False/high ~7/9 -> false-pass risk)",
     "compliant_correct": "1/3 (unstable; false-failed compliant 2/3)",
     "notbold_caught": "3/3",
@@ -501,7 +502,7 @@ def _write(summary, safe, rejected, prompts, models, stage_tag="stage1"):
                     f"basis={w.get('basis')!r}" if w else ""))
     top = [(r["model"], r["prompt"]) for r in safe[:5]]
     L.append("")
-    L.append(f"PRODUCTION REFERENCE (same set, prior data): {PROD_REFERENCE}")
+    L.append(f"PRIOR-PRODUCTION REFERENCE (same set, prior data): {PROD_REFERENCE}")
     L.append(f"CROP+A: {CROP_A_REFERENCE}")
     L.append("")
     L.append(f"SUGGESTED Stage-2 combos (top {len(top)} safe): " + ", ".join(f"{m}:{v}" for m, v in top))

@@ -113,9 +113,10 @@ def _pcts(vals):
 
 
 def _gate_proxy(o):
-    """The production header_body_gate's BOLD outcome for one witness observation (wording/caps
-    not judged here — the witness schema records header_text_seen only). FAIL = a confident
-    violation read on a (presumed-compliant) baseline = the false-fail direction."""
+    """The prior-default header_body_gate's BOLD outcome (production default is medium_pass_gate
+    since 2026-06-11, whose PASS also accepts medium confidence) for one witness observation
+    (wording/caps not judged here — the witness schema records header_text_seen only). FAIL = a
+    confident violation read on a (presumed-compliant) baseline = the false-fail direction."""
     if o is None:
         return "ERR"
     if not o.get("warning_present"):

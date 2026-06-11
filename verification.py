@@ -603,12 +603,12 @@ def _check_warning(gw) -> FieldResult:
         present, else fall back to the model's header_all_caps, with caps==False as a
         fail backstop;
       - require the "S" in Surgeon / "G" in General to be capitalized (all-caps is fine);
-      - judge BOLD per config.WARNING_BOLD_POLICY (default "header_body_gate": Pass/Review/Fail
+      - judge BOLD per config.WARNING_BOLD_POLICY (default "medium_pass_gate": Pass/Review/Fail
         on BOTH 27 CFR 16.22 visual rules -- the header must be bold AND the body/remainder must
-        NOT be bold. PASS only when header_bold True + high confidence AND body_bold False + high
+        NOT be bold. PASS when header_bold True AND body_bold False, each at medium-or-high
         confidence; FAIL on a high-confidence violation of either (header not bold, or body bold);
-        anything uncertain (null / medium / low on either field) -> needs-review. header_bold True
-        by itself can no longer pass. The inline comment at the bold block documents all policies.)
+        anything else (null / low, or a medium-confidence violation) -> needs-review. header_bold
+        True by itself can never pass. The inline comment at the bold block documents all policies.)
     Title case fails and an unverifiable bold read goes to review; a near-miss wording read
     goes to needs-review; nothing non-exact ever auto-passes.
     """
@@ -660,12 +660,12 @@ def _check_warning(gw) -> FieldResult:
                                cause="caps")
 
     # Bold handling per config.WARNING_BOLD_POLICY (see config.py for the full description).
-    #   "header_body_gate" -> DEFAULT. Pass/Review/Fail on BOTH visual rules (27 CFR 16.22): the
-    #                    header must be bold AND the remainder/body must NOT be bold. header_bold
-    #                    alone can no longer pass. PASS requires HIGH confidence on both fields.
-    #   "medium_pass_gate" -> same two rules as header_body_gate, but the PASS gate accepts MEDIUM-or-
-    #                    high confidence; FAIL is unchanged (high-confidence violation only). Behind
-    #                    the env option, NOT the default -- benchmark before promoting.
+    #   "medium_pass_gate" -> DEFAULT. Pass/Review/Fail on BOTH visual rules (27 CFR 16.22): the
+    #                    header must be bold AND the remainder/body must NOT be bold. The PASS gate
+    #                    accepts MEDIUM-or-high confidence; FAIL fires only on a HIGH-confidence
+    #                    violation. header_bold alone can never pass.
+    #   "header_body_gate" -> the stricter prior default (env-selectable): same two rules, but PASS
+    #                    requires HIGH confidence on both fields; medium-confidence reads -> review.
     #   "confidence_gate" -> fail-closed using header_bold + header_bold_confidence (header only);
     #   "trust_model"     -> judge from header_bold alone (ignores confidence);
     #   "note"            -> bold is telemetry only, never gates;
@@ -816,11 +816,12 @@ _UNVERIFIABLE_REASON = ("could not verify required label information from this i
 # reasons that mean "couldn't read it from this photo" (vs a definite, legible violation like
 # title case, clearly-wrong wording, or a HIGH-CONFIDENCE bold violation, which are NOT reframed).
 # NOTE: the confident bold-violation messages ("does not appear to be in bold" / "appears to be in
-# bold") are deliberately NOT listed here -- under header_body_gate those only fire on a
-# high-confidence determination, so they are definite findings, not readability problems, and
-# rewording them to "submit a clearer image" would mislead the reviewer about the most important
-# rule. The genuinely-unverifiable bold outcomes still reframe via "could not confirm" /
-# "could not verify that" (header_body_gate REVIEW and confidence_gate's null/low fail-closed).
+# bold") are deliberately NOT listed here -- under both two-rule gates (medium_pass_gate, the
+# default, and header_body_gate) those only fire on a high-confidence determination, so they are
+# definite findings, not readability problems, and rewording them to "submit a clearer image"
+# would mislead the reviewer about the most important rule. The genuinely-unverifiable bold
+# outcomes still reframe via "could not confirm" / "could not verify that" (the two-rule gates'
+# REVIEW messages and confidence_gate's null/low fail-closed).
 _READABILITY_REASON_HINTS = (
     "not found on the label", "could not be read", "appears present but", "is unreadable",
     "could not verify that", "could not confirm", "close but not an exact match",

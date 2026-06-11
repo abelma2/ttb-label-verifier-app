@@ -1,5 +1,7 @@
-"""Compare the production warning-bold policy `header_body_gate` (default) against the proposed
-`medium_pass_gate` -- BENCHMARK ONLY (does not modify production code or change the default).
+"""Compare the strict warning-bold policy `header_body_gate` (the production default when this
+benchmark was written) against `medium_pass_gate` (promoted to the production default 2026-06-11
+per course-staff guidance -- see BENCHMARK_NOTES.md) -- BENCHMARK ONLY (does not modify production
+code or change the default).
 
 Why this design: both policies are DETERMINISTIC functions of the same extracted
 `government_warning` observation (header_bold/header_bold_confidence/body_bold/body_bold_confidence).

@@ -8,7 +8,7 @@ photographed -> the noisiest input. So on the warning-bearing backs: PASS = corr
 that is the safe-but-low-throughput behavior we want to quantify). Fronts: correct = no warning.
 
 3x so we can report how often a back's verdict is identical across reps (the instability that 1x runs
-on noisy photos cannot show), and the MAIN-ALONE baseline (production header_body_gate on the
+on noisy photos cannot show), and the MAIN-ALONE baseline (the prior-default header_body_gate on the
 gpt-5.4-mini:A read, which CAN fail) to see whether the 2 specialists change real-label outcomes.
 
 Usage: python scripts/benchmarks/triple_gate_real.py
@@ -158,7 +158,8 @@ def _write(r):
     L.append(f"review reasons (backs): {r['review_reasons']}")
     L.append(f"latency: avg {r['wall_avg']}s  p50 {r['wall_p50']}s  max {r['wall_max']}s  >5s {r['over_5s']}")
     L.append("")
-    L.append("per-image-rep (main-alone = production gate on the gpt-5.4-mini:A read; can FAIL):")
+    L.append("per-image-rep (main-alone = prior-default header_body_gate on the gpt-5.4-mini:A read; "
+             "can FAIL):")
     for rec in r["records"]:
         mv = rec["main"]
         mvs = "ERR" if mv is None else f"hb={mv[0]}/{(mv[2] or '-')[:1]} bb={mv[1]}/{(mv[3] or '-')[:1]} leg={mv[4]}"

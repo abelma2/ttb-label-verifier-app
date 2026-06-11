@@ -6,7 +6,8 @@ baseline bottles, then reports stability: adversarial accuracy across all runs, 
 per run, average latency, and run-to-run variance in header_bold / header_bold_confidence.
 
 The verdict reported is the GOVERNMENT-WARNING verdict (_check_warning) -- the only thing that
-varies on these labels -- under the current WARNING_BOLD_POLICY (confidence_gate).
+varies on these labels -- under the live WARNING_BOLD_POLICY (default medium_pass_gate since
+2026-06-11; historical runs used confidence_gate).
 
 Usage:
   python scripts/benchmarks/stability_benchmark.py                          # default 4 models, 5 runs

@@ -3,9 +3,10 @@
 Runs the real production extraction (`extraction.extract_fields`, the production _PROMPT + model)
 and the real verifier (`verification.verify_label_only`) on the controlled bold_safety set --
 exactly as-is, nothing modified. It pins `WARNING_BOLD_POLICY=confidence_gate` by default (the gate
-this benchmark is named for; the production default is now header_body_gate) -- set the env var to
-measure another gate, and the report title/banner reflect whichever policy actually ran. For each
-image it records the government_warning field's verdict (pass / needs_review / fail).
+this benchmark is named for; the production default is now medium_pass_gate (since 2026-06-11)) --
+set the env var to measure another gate, and the report title/banner reflect whichever policy
+actually ran. For each image it records the government_warning field's verdict
+(pass / needs_review / fail).
 
 The safety question: on a NOT-bold header or an ALL-bold-body warning, does the warning verdict
 come back PASS? That would be an automated false-pass of a violation. (Note: confidence_gate checks
@@ -43,7 +44,7 @@ def main():
         sys.exit("ERROR: no OpenAI key (OPENAI_API_KEY env or .streamlit/secrets.toml).")
 
     # This benchmark is named for (and its prose describes) confidence_gate; pin it so the script
-    # measures that gate even though the production default is now header_body_gate. Must be set
+    # measures that gate even though the production default is now medium_pass_gate. Must be set
     # BEFORE the first import that pulls in config (extraction imports it). Override via the env var.
     os.environ.setdefault("WARNING_BOLD_POLICY", "confidence_gate")
     # Production path, used exactly as-is (only called, never modified).

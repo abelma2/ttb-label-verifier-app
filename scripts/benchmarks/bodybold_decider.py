@@ -6,7 +6,9 @@ exactly where gpt-4o and the gpt-5.x reasoning models disagreed (the rum body). 
 has font-controlled BODY-bold ground truth (boldbody__* = header bold AND body bold, a violation).
 
 This runs the PRODUCTION pipeline (extract_fields full prompt -> verification._check_warning under
-the live header_body_gate) on those fixtures, per model, and asks the decisive question:
+the live WARNING_BOLD_POLICY (default medium_pass_gate since 2026-06-11; FAIL behavior identical
+to header_body_gate, but a medium-confidence body_bold=False read now PASSES instead of
+reviewing)) on those fixtures, per model, and asks the decisive question:
   - boldbody__*      (body IS bold -> a violation)  -> a model that reads body-bold FAILs it;
                                                        a rubber-stamp (body_bold=False) PASSES it.
   - bold_compliant__* (bold header, non-bold body)  -> should PASS.

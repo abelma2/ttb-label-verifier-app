@@ -20,7 +20,7 @@ Arbitration under test (the user's, refined):
 
 Labels are COMPLIANT, so on the warning-bearing backs: PASS = correct, FAIL = FALSE-fail,
 REVIEW = over-caution. Fronts: correct = no warning. Also reports the MAIN-ALONE baseline
-(production header_body_gate on the gpt-5.4-mini:A read, which CAN fail) from the same reads.
+(the prior-default header_body_gate on the gpt-5.4-mini:A read, which CAN fail) from the same reads.
 
 Usage: python scripts/benchmarks/triple_gate_compliant.py
 Writes output/triple_gate_compliant_<ts>.{txt,json}.
@@ -70,7 +70,7 @@ def _vals(f):
 
 
 def _solo_gate(f):
-    """MAIN-ALONE baseline: production header_body_gate on a single read (this one CAN fail)."""
+    """MAIN-ALONE baseline: the prior-default header_body_gate on a single read (this one CAN fail)."""
     if not f:
         return "ERR"
     if f.get("warning_present") is False:
@@ -255,8 +255,8 @@ def _write(report):
     L.append(f"per-folder backs (triple gate): {report['by_folder']}")
     L.append(f"review/verdict reasons (backs): {report['review_reasons']}")
     L.append("")
-    L.append("per-image (main-alone = production gate on the gpt-5.4-mini:A read; S1.bb/S2.bb = "
-             "each S sample's body_bold; wall = parallel max):")
+    L.append("per-image (main-alone = prior-default header_body_gate on the gpt-5.4-mini:A read; "
+             "S1.bb/S2.bb = each S sample's body_bold; wall = parallel max):")
     for pi in report["per_image"]:
         wstr = f"{pi['wall']:.2f}s" if pi["wall"] is not None else "ERR"
         s1 = pi["reads"]["specialist_1"]; s2 = pi["reads"]["specialist_2"]

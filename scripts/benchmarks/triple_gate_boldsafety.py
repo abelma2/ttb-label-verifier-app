@@ -193,7 +193,8 @@ def _write(report):
     L.append(f"latency (parallel wall = slowest of 3 reads): avg {report['wall_avg']}s  "
              f"p50 {report['wall_p50']}s  max {report['wall_max']}s  >5s {report['over_5s']}")
     L.append("")
-    L.append("per-image-rep (main-alone = production gate on the gpt-5.4-mini:A read; can FAIL):")
+    L.append("per-image-rep (main-alone = prior-default header_body_gate on the gpt-5.4-mini:A read; "
+             "can FAIL):")
     for r in report["records"]:
         wstr = f"{r['wall']:.2f}s" if r["wall"] is not None else "ERR"
         mbc = (r["main_bbc"] or "-")[:1]

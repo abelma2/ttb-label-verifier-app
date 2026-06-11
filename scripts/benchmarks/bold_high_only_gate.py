@@ -1,6 +1,6 @@
-"""Benchmark-only: compare the current bold confidence-gate rule against a stricter 'high-only' rule,
-re-using the raw header_bold / header_bold_confidence already captured in
-artifacts/confidence_gate_safety_results.json (NO new API calls).
+"""Benchmark-only: compare the confidence_gate rule (the production default at the time) against a
+stricter 'high-only' rule, re-using the raw header_bold / header_bold_confidence already captured
+in artifacts/confidence_gate_safety_results.json (NO new API calls).
 
 Gate rules compared (applied to the production reads, in isolation):
   current   : header_bold is True AND confidence in {medium, high}  -> auto-PASS bold

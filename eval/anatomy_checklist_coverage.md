@@ -155,7 +155,7 @@ Updated `verifier_checks` notes to match **current production behavior** (verifi
 | `alcohol_content` (all) | "notation not checked" | **+ notation now checked** (bare `ABV` rejected, `_check_abv_notation`) |
 | `net_contents` (all) | "string/fuzzy; std-of-fill not checked" | **unit-aware VOLUME compare** (same-volume/different-unit → review); std-of-fill still not enforced |
 | `name_and_address` (all) | "fuzzy; no-intervening-text" | **punctuation/relationship-prefix-normalized fuzzy + coverage guard**; **producer-name substitution = known gap (xfail)** |
-| `health_warning` (all) | "exact wording + caps + S/G + bold" | clarified: wording/CAPS/S-G **deterministic**; **bold confidence-gated (`header_body_gate`) and run-to-run unstable** |
+| `health_warning` (all) | "exact wording + caps + S/G + bold" | clarified: wording/CAPS/S-G **deterministic**; **bold confidence-gated (`WARNING_BOLD_POLICY`, default `medium_pass_gate` since 2026-06-11) and run-to-run unstable** |
 | malt `alcohol_content` | — | clarified: ABV is **conditional** (flavor trigger / state); **flavor trigger not modeled** |
 | wine `alcohol_content` / `appellation` / `sulfite` | "yes" | marked **conditional** per the checklist (table-wine ABV; varietal/vintage-triggered appellation; ≥10ppm sulfite) |
 | (new key) `_layout_typography_structural` | — | added to all three: same-field-of-vision, separate-and-apart, no-intervening-text, GW bold typography → **structural/out-of-scope or reviewer-leaning** |

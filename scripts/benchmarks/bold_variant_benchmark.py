@@ -375,7 +375,8 @@ def _rf(name, schema):
 # --- bold gates (the ONLY thing that differs between variants) -----------------
 
 def _gate_a(f):
-    """Production confidence_gate: trust header_bold only when the model is confident."""
+    """The confidence_gate (production default at the time of this benchmark): trust header_bold
+    only when the model is confident."""
     bold = f.get("header_bold")
     confident = (f.get("header_bold_confidence") or "low") in ("medium", "high")
     if bold is True and confident:

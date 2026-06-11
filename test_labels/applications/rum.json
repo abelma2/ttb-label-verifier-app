@@ -27,7 +27,7 @@
     "proof":                 {"citation": "27 CFR 5.65",          "applies": "yes (proof shown)", "verifier_checks": "yes (now validated: proof must equal 2x ABV; 50 proof on 20% ABV -> FAIL; config.PROOF_ABV_TOLERANCE)"},
     "net_contents":          {"citation": "27 CFR 5.70 / 5.203",  "applies": "yes", "verifier_checks": "partial (unit-aware VOLUME compare: same volume in a different unit/format -> needs_review; standard-of-fill table 5.203 still NOT enforced)"},
     "name_and_address":      {"citation": "27 CFR 5.66 / 5.67 / 5.68", "applies": "yes", "verifier_checks": "partial (punctuation/relationship-prefix-normalized fuzzy + short-subset coverage guard; producer-name SUBSTITUTION is a KNOWN GAP/xfail; 'Bottled By' prefix and no-intervening-text not checked)"},
-    "health_warning":        {"citation": "27 CFR part 16",       "applies": "yes", "verifier_checks": "yes (exact wording + ALL-CAPS + S/G capitalization are deterministic; BOLD is confidence-gated (header_body_gate) and run-to-run UNSTABLE; checked from the LABEL, not this form value)"},
+    "health_warning":        {"citation": "27 CFR part 16",       "applies": "yes", "verifier_checks": "yes (exact wording + ALL-CAPS + S/G capitalization are deterministic; BOLD is confidence-gated (WARNING_BOLD_POLICY, default medium_pass_gate) and run-to-run UNSTABLE; checked from the LABEL, not this form value)"},
     "country_of_origin":     {"citation": "27 CFR 5.69 / 19 CFR 134.11", "applies": "no (domestic)", "verifier_checks": "yes (when imported)"}
   },
 

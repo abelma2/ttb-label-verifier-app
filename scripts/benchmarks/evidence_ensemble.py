@@ -1166,7 +1166,8 @@ def _build_stability_md(out):
              f"overall verdict. A single baseline run is therefore not authoritative — which is exactly "
              f"why the stage gate exists.")
     L.append("- **The instability is concentrated in the warning bold gate** (Pass B's header-bold "
-             "value/confidence wobbles between runs, flipping the `header_body_gate` verdict between "
+             "value/confidence wobbles between runs, flipping the warning bold-gate verdict "
+             "(config.WARNING_BOLD_POLICY; default medium_pass_gate since 2026-06-11) between "
              "pass and needs_review) and the name/address fuzzy matcher — the two pre-existing soft "
              "spots, not the witnesses.")
     L.append("- **The visual witness (C) does not stabilise bold.** Its header-bold reads have their own "
@@ -1357,9 +1358,11 @@ def _md_answers(base, errs):
             for c, fs in nonpass_bottles:
                 L.append(f"  - `{c}`: {', '.join(fs)}")
             L.append("  - On clean labels the expected non-pass cause is the **warning bold gate** "
-                     "(`header_body_gate` needs BOTH header-bold and non-bold-body at high confidence; "
-                     "anything uncertain → needs_review by design) and the known run-to-run brand/bold "
-                     "instability (see `BENCHMARK_NOTES.md`), not a wording/ABV failure.")
+                     "(the bold gate needs BOTH header-bold=True and body_bold=False — at high "
+                     "confidence under header_body_gate, medium-or-high under the medium_pass_gate "
+                     "default since 2026-06-11; anything uncertain → needs_review by design) and the "
+                     "known run-to-run brand/bold instability (see `BENCHMARK_NOTES.md`), not a "
+                     "wording/ABV failure.")
     else:
         L.append("- _Baseline stage not run._")
     L.append("")

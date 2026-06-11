@@ -16,7 +16,7 @@ A missing/errored witness routes to REVIEW (fail-closed).
 
 These labels are COMPLIANT, so on the warning-bearing backs: PASS = correct, FAIL = FALSE-fail
 (the cost of trusting an over-flag), REVIEW = over-caution. Fronts: correct = no warning.
-Per-image also shows what each read's solo production gate (header_body_gate) would say.
+Per-image also shows what each read's solo header_body_gate (the prior production default) would say.
 
 Usage: python scripts/benchmarks/combined_gate_compliant.py
 Writes output/combined_gate_compliant_<ts>.{txt,json}.
@@ -61,7 +61,7 @@ def _vals(f):
 
 
 def _solo_gate(f):
-    """What a single read would say under the production header_body_gate."""
+    """What a single read would say under the prior-default header_body_gate."""
     if not f:
         return "ERR"
     if f.get("warning_present") is False:
@@ -190,7 +190,8 @@ def _write(report):
     L.append(f"per-folder backs: {report['by_folder']}")
     L.append(f"review/verdict reasons (backs): {report['review_reasons']}")
     L.append("")
-    L.append("per-image (main solo / S solo = each read's production-gate verdict; wall = parallel max):")
+    L.append("per-image (main solo / S solo = each read's header_body_gate (prior-default) verdict; "
+             "wall = parallel max):")
     for pi in report["per_image"]:
         wstr = f"{pi['wall']:.2f}s" if pi["wall"] is not None else "ERR"
         L.append(f"   {pi['img']:42s} wall={wstr:7s} main[{pi['main_solo']:9s}] S[{pi['spec_solo']:9s}] "

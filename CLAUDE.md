@@ -178,30 +178,32 @@ path — that single `app.py` convenience is the one deliberate non-port).
   header **caps** is judged deterministically from the text when the header is present,
   else from `header_all_caps` (explicit `False` always fails); the `S`/`G` in
   `Surgeon General` must be capitalized (all-caps satisfies this); and **bold** is judged per
-  `config.WARNING_BOLD_POLICY` (default `"header_body_gate"`). 27 CFR 16.22 has **two** visual
+  `config.WARNING_BOLD_POLICY` (default `"medium_pass_gate"` since **2026-06-11**, relaxed from
+  `header_body_gate` per course-staff guidance that the bold PASS gate need not demand high
+  confidence). 27 CFR 16.22 has **two** visual
   rules — `GOVERNMENT WARNING` must be **bold** AND the **remainder/body may NOT be bold** — so
   the gate checks both, from the model's `header_bold`/`header_bold_confidence` and
-  `body_bold`/`body_bold_confidence`. It **PASSES only when** wording matches, the header is
-  all-caps, `header_bold` is `True` at **high** confidence, **AND** `body_bold` is `False` at
-  **high** confidence. It **FAILS** on a high-confidence violation of either (`header_bold False`
-  → header not bold, or `body_bold True` → body bold). Anything uncertain (`None` / medium / low
-  on either field) → **needs review**. `header_bold=True` **by itself can no longer pass** — the
-  body/remainder must be confirmed not-bold. This closes the structural gap the benchmark series
-  found (the old header-only `confidence_gate` auto-passed ~93% of all-bold-body violations
-  because it never inspected the body weight; see `BENCHMARK_NOTES.md`). The other modes (kept
-  for benchmarking, **never the production default**) are `"medium_pass_gate"`
-  (**experimental, env-only**: identical to `header_body_gate` except its PASS gate also accepts
-  **medium** confidence — FAIL is unchanged. A benchmark showed it cuts false reviews on clean
-  labels but adds false PASSES on medium-confidence not-bold misreads, so it is **not** the
-  default; production still requires **high** confidence on both bold rules to PASS — see
-  `BENCHMARK_NOTES.md`), `"confidence_gate"` (prior default — header-only fail-closed gate: bold
+  `body_bold`/`body_bold_confidence`. It **PASSES when** wording matches, the header is
+  all-caps, `header_bold` is `True` **AND** `body_bold` is `False`, each at **medium-or-high**
+  confidence. **FAIL stays strict**: only a **high**-confidence violation of either rule fails
+  (`header_bold False` → header not bold, or `body_bold True` → body bold). Everything else
+  (`None` / low, or a **medium-confidence violation**) → **needs review**. `header_bold=True`
+  **by itself can never pass** — the body/remainder must be confirmed not-bold. The two-rule
+  structure closes the gap the benchmark series found (the old header-only `confidence_gate`
+  auto-passed ~93% of all-bold-body violations because it never inspected the body weight; see
+  `BENCHMARK_NOTES.md`). The known cost of the relaxed PASS gate (benchmarked before the
+  default flip): a medium-confidence **misread** of a not-bold header as bold now passes
+  instead of reviewing. The other modes (kept for benchmarking / env-selectable) are
+  `"header_body_gate"` (the **stricter prior default**: identical FAIL behavior, but PASS
+  requires **high** confidence on both bold rules — set `WARNING_BOLD_POLICY=header_body_gate`
+  to restore it), `"confidence_gate"` (older default — header-only fail-closed gate: bold
   `True` + medium/high → pass, `False` + medium/high → FAIL, `None`/low → FAIL "submit a clearer
   image"; does **not** check the body), `"note"` (bold = telemetry only, otherwise-valid warning
   passes with a note), `"review"` (always escalate to a human), and `"trust_model"` (judge from
   `header_bold` alone, ignoring confidence). Title case fails; a near-miss wording read (the
   model misreading small print) goes to review, and nothing non-exact ever auto-passes. The
-  project's most important correctness rule. **Medium confidence is never sufficient for a
-  production PASS** (only the experimental `medium_pass_gate` accepts it).
+  project's most important correctness rule: the wording/caps checks and the fail-closed FAIL
+  conditions are not negotiable; only the PASS-gate confidence bar was relaxed.
 - **Alcohol content is class-dependent** (`_check_abv` / `_abv_missing_by_class`):
   required for spirits, conditional for wine (≤14% "table"/"light" wine may omit it),
   optional for beer. Don't "simplify" this into failing every missing ABV.
@@ -296,8 +298,9 @@ user-facing `.reason` string, which is display text and may be reworded freely.
 `config.py` centralizes everything regulatory or tunable: the canonical
 `GOVERNMENT_WARNING` text (exact match — must be exactly right; verified verbatim against
 all three BAMs), fuzzy/ABV/name-address thresholds, `WARNING_BOLD_POLICY` (default
-`"header_body_gate"` — Pass/Review/Fail on BOTH the bold-header and non-bold-body rules; see
-the warning invariant above and `BENCHMARK_NOTES.md`), `EXTRACTION_MODEL` (default `gpt-5.4-mini`, chosen by a 5× stability
+`"medium_pass_gate"` — Pass/Review/Fail on BOTH the bold-header and non-bold-body rules, with
+the PASS gate accepting medium-or-high confidence; see the warning invariant above and
+`BENCHMARK_NOTES.md`), `EXTRACTION_MODEL` (default `gpt-5.4-mini`, chosen by a 5× stability
 pass), `REQUEST_TIMEOUT_SECONDS`, and `BATCH_MAX_WORKERS`. The BAM publication IDs are
 documented there. Most knobs also read an env var override (e.g. `EXTRACTION_MODEL`) for A/B
 testing without editing the file.

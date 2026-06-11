@@ -32,27 +32,26 @@ GOVERNMENT_WARNING_HEADER = "GOVERNMENT WARNING"
 WARNING_WORDING_REVIEW_FLOOR = 90
 
 # Bold handling policy for the government warning. Modes:
-#   "header_body_gate" -- DEFAULT. 27 CFR 16.22 has TWO visual rules: "GOVERNMENT WARNING" must be
-#                    bold, AND the remainder/body may NOT be bold. The warning PASSES only when BOTH
-#                    are confidently satisfied (header_bold True + high confidence AND body_bold
-#                    False + high confidence, on top of wording + ALL-CAPS); it FAILS on a
-#                    high-confidence violation of either (header not bold, or body bold); anything
-#                    uncertain (null / medium / low on either field) goes to needs-REVIEW. header_bold
-#                    True by itself can no longer pass -- the body/remainder is checked too. The
-#                    benchmark series (BENCHMARK_NOTES.md) showed the old header-only gate auto-passed
-#                    ~93% of all-bold-body violations; this closes that structural gap.
-#   "medium_pass_gate" -- EXPERIMENTAL (env option, NOT the default). Identical two-rule structure to
-#                    header_body_gate, but the PASS gate accepts MEDIUM-or-high confidence instead of
-#                    high-only: PASS when header_bold True AND body_bold False, each at medium/high
-#                    confidence. FAIL is UNCHANGED from header_body_gate -- only a HIGH-confidence
-#                    violation of either rule fails (header_bold False+high, or body_bold True+high);
-#                    everything else (null, low, or a medium-confidence violation) -> needs-review.
-#                    The only behavioral delta vs header_body_gate is that medium-confidence,
-#                    both-rules-satisfied reads move from REVIEW to PASS (fewer false reviews on clean
-#                    labels); because FAIL is unchanged, it cannot auto-pass any high-confidence
-#                    violation header_body_gate catches. Select with WARNING_BOLD_POLICY=medium_pass_gate;
-#                    benchmark (warning_check / adversarial + eval) before considering it as default.
-#   "confidence_gate" -- prior default. Header only: header_bold True + medium/high -> pass; False +
+#   "medium_pass_gate" -- DEFAULT (since 2026-06-11, per course-staff guidance that the bold PASS
+#                    gate need not demand high confidence). 27 CFR 16.22 has TWO visual rules:
+#                    "GOVERNMENT WARNING" must be bold, AND the remainder/body may NOT be bold.
+#                    PASS when header_bold True AND body_bold False, each at MEDIUM-or-high
+#                    confidence (on top of wording + ALL-CAPS). FAIL stays strict -- only a
+#                    HIGH-confidence violation of either rule fails (header_bold False+high, or
+#                    body_bold True+high); everything else (null, low, or a medium-confidence
+#                    violation) -> needs-review. The only relaxation vs header_body_gate is that
+#                    medium-confidence, both-rules-satisfied reads move from REVIEW to PASS (fewer
+#                    false reviews on clean labels); because FAIL is unchanged, it cannot auto-pass
+#                    any high-confidence violation header_body_gate catches. Known cost (see
+#                    BENCHMARK_NOTES.md): a medium-confidence MISREAD of a not-bold header as bold
+#                    now passes instead of going to review.
+#   "header_body_gate" -- the STRICTER prior default (kept selectable via the env var). Same two
+#                    rules, but PASS requires HIGH confidence on both fields; anything uncertain
+#                    (null / medium / low on either) goes to needs-REVIEW. header_bold True by
+#                    itself can never pass -- the body/remainder is checked too. The benchmark
+#                    series (BENCHMARK_NOTES.md) showed the old header-only gate auto-passed
+#                    ~93% of all-bold-body violations; both two-rule gates close that gap.
+#   "confidence_gate" -- older default. Header only: header_bold True + medium/high -> pass; False +
 #                    medium/high -> fail; null/low -> fail-closed. Does NOT check the body (all-bold
 #                    warnings auto-pass). Kept for comparison/benchmarking.
 #   "note"        -- bold is telemetry only; an otherwise-valid warning PASSES with a bold note.
@@ -60,7 +59,7 @@ WARNING_WORDING_REVIEW_FLOOR = 90
 #   "trust_model" -- judge from header_bold alone (True->pass, False->FAIL, None->review),
 #                    ignoring confidence. Not recommended.
 # See BENCHMARK_NOTES.md for the bold experiments behind these choices.
-WARNING_BOLD_POLICY = os.environ.get("WARNING_BOLD_POLICY", "header_body_gate")
+WARNING_BOLD_POLICY = os.environ.get("WARNING_BOLD_POLICY", "medium_pass_gate")
 
 # --- Fuzzy-match thresholds (0-100) for text fields (brand, class/type) -------
 #   score >= FUZZY_PASS          -> pass
