@@ -26,10 +26,12 @@ archive/
 artifacts/
 
 # --- Label images are local-only test data (large / not redistributable). -----
-# Keep the typed application fixtures the eval and app compare against.
+# Keep the typed application fixtures the eval and app compare against,
+# and the folder's own README (documentation, not an image).
 test_labels/*
 !test_labels/applications/
 !test_labels/applications/*.json
+!test_labels/README.txt
 
 # --- Local tooling state ---------------------------------------------------------
 .claude/

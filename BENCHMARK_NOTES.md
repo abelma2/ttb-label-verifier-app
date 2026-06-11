@@ -17,6 +17,13 @@ for the prior header-only `confidence_gate`) for why bold is neither ignored nor
 > that discuss them are retained as historical findings, not live features. Production remains
 > OpenAI-only with `WARNING_BOLD_POLICY = "header_body_gate"`.
 
+> **Run-artifact paths.** Sections below cite evidence files as `output/<name>` — the path where
+> the run originally landed. Superseded runs are periodically swept to `archive/old_output_runs/`
+> (both dirs are gitignored), so look there when an `output/` citation doesn't resolve. The
+> regulatory research behind the bold gate lives in `docs/bold_research.md` (this file is its
+> empirical counterpart); the frozen flag-on/flag-off eval snapshots backing the "flag stays off"
+> verdict are tracked at `eval/results_flag_on/` and `eval/results_flag_off/`.
+
 ## Method
 
 `scripts/benchmarks/model_benchmark.py` runs the app's real extraction prompt across many vision models
