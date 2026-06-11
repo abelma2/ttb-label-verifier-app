@@ -1,0 +1,579 @@
+"use client";
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import { MAX_IMAGES_PER_PRODUCT, VerifyError } from "@/lib/api";
+import {
+  APP_FIELDS,
+  appRowFor,
+  parseApplications,
+  type ParsedApplications,
+} from "@/lib/applications";
+import { errorShort, runBatch, type BatchItem, type BatchProgress } from "@/lib/batch";
+import { ACCEPTED_IMAGE_TYPES } from "@/lib/image";
+import { groupUploads } from "@/lib/stem";
+import type { Status } from "@/lib/types";
+import { ProductReport } from "./ResultsView";
+
+type Phase = "idle" | "running" | "done";
+
+const STATUS_LABEL: Record<Status, string> = {
+  pass: "Pass",
+  needs_review: "Needs review",
+  fail: "Fail",
+};
+
+/** Worst-first ordering for the results table (port of app.py). */
+const RANK_ORDER: Record<string, number> = { fail: 0, error: 1, needs_review: 2, pass: 3 };
+
+const PAGE_SIZE = 10;
+
+function itemKey(item: BatchItem): string {
+  return item.errorKind !== null || item.result === null ? "error" : item.result.overall;
+}
+
+function fileKey(f: File): string {
+  return `${f.name}|${f.size}|${f.lastModified}`;
+}
+
+/** Self-managing preview thumbnail (object URL created/revoked with the file). */
+function FileThumb({ file, alt }: { file: File; alt: string }) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    const u = URL.createObjectURL(file);
+    setUrl(u);
+    return () => URL.revokeObjectURL(u);
+  }, [file]);
+  if (!url) return null;
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src={url} alt={alt} className="h-28 rounded-lg border border-slate-200 object-contain" />;
+}
+
+export default function BatchClient() {
+  const [files, setFiles] = useState<File[]>([]);
+  const [groupPairs, setGroupPairs] = useState(true);
+  const [apps, setApps] = useState<ParsedApplications | null>(null);
+  const [appFileName, setAppFileName] = useState<string | null>(null);
+  const [phase, setPhase] = useState<Phase>("idle");
+  const [progress, setProgress] = useState<BatchProgress | null>(null);
+  const [items, setItems] = useState<BatchItem[] | null>(null);
+  // snapshot of the products the run was computed from — detail thumbnails must
+  // not drift when the upload list changes after a run (the staleness cue case)
+  const [runProducts, setRunProducts] = useState<{ label: string; files: File[] }[]>([]);
+  const [elapsed, setElapsed] = useState<number | null>(null);
+  const [resultsSig, setResultsSig] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [announcement, setAnnouncement] = useState("");
+  const [dragging, setDragging] = useState(false);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const appInputRef = useRef<HTMLInputElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const resultsRef = useRef<HTMLDivElement>(null);
+
+  const running = phase === "running";
+  const mapping = apps?.error ? {} : (apps?.mapping ?? {});
+  const products = useMemo(() => groupUploads(files, groupPairs), [files, groupPairs]);
+  const rowFor = (label: string) => appRowFor(mapping, label);
+
+  // staleness signature: results carry the inputs they were computed from.
+  // Application ROW VALUES are part of it — a corrected file with the same
+  // product stems still changes verdicts, so it must trip the banner.
+  const currentSig = JSON.stringify({
+    files: files.map((f) => fileKey(f)).sort(),
+    group: groupPairs,
+    apps: Object.entries(mapping)
+      .map(([k, row]) => [k, ...APP_FIELDS.map((f) => row[f])])
+      .sort(),
+  });
+
+  const stems = new Set(products.map((p) => p.label.toLowerCase()));
+  const unusedAppRows = Object.keys(mapping).filter((p) => !stems.has(p)).sort();
+  const oversizeProducts = products.filter((p) => p.files.length > MAX_IMAGES_PER_PRODUCT);
+
+  function addFiles(list: FileList | File[] | null) {
+    if (!list) return;
+    const incoming = [...list].filter((f) => ACCEPTED_IMAGE_TYPES.includes(f.type));
+    setFiles((prev) => {
+      const seen = new Set(prev.map(fileKey));
+      return [...prev, ...incoming.filter((f) => !seen.has(fileKey(f)))];
+    });
+  }
+
+  async function onAppFile(file: File | null) {
+    if (!file) return;
+    setAppFileName(file.name);
+    setApps(parseApplications(await file.text(), file.name));
+  }
+
+  async function handleScreen() {
+    if (products.length === 0 || running) return;
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setPhase("running");
+    setItems(null);
+    setRunProducts(products);
+    setElapsed(null);
+    setPage(1);
+    setProgress({ done: 0, total: products.length, current: "starting" });
+    setAnnouncement(`Screening ${products.length} products.`);
+    const t0 = performance.now();
+    try {
+      const results = await runBatch(products, rowFor, setProgress, controller.signal);
+      // a late completion from a cancelled/superseded run must never clobber
+      // the current run's state (Cancel -> re-Screen within the same window)
+      if (abortRef.current !== controller) return;
+      const secs = Math.round((performance.now() - t0) / 100) / 10;
+      setItems(results);
+      setElapsed(secs);
+      setResultsSig(currentSig);
+      setPhase("done");
+      const counts = { fail: 0, error: 0, needs_review: 0, pass: 0 };
+      results.forEach((it) => (counts[itemKey(it) as keyof typeof counts] += 1));
+      setAnnouncement(
+        `Screening complete: ${counts.fail} fail, ${counts.needs_review} need review, ` +
+          `${counts.pass} pass, ${counts.error} errors.`,
+      );
+      requestAnimationFrame(() => {
+        // skip when this tab panel is hidden (display:none -> no layout box)
+        if (resultsRef.current?.offsetParent != null) {
+          resultsRef.current.scrollIntoView({ block: "start" });
+          document.getElementById("batch-results-heading")?.focus({ preventScroll: true });
+        }
+      });
+    } catch (err) {
+      if (abortRef.current !== controller) return;
+      if (err instanceof VerifyError && err.kind === "cancelled") {
+        setPhase("idle");
+        setAnnouncement("Batch screening cancelled.");
+        return;
+      }
+      setPhase("idle");
+      setAnnouncement("Batch screening failed unexpectedly. Please try again.");
+    } finally {
+      if (abortRef.current === controller) {
+        abortRef.current = null;
+        setProgress(null);
+      }
+    }
+  }
+
+  function handleClear() {
+    abortRef.current?.abort();
+    setFiles([]);
+    setApps(null);
+    setAppFileName(null);
+    setItems(null);
+    setRunProducts([]);
+    setElapsed(null);
+    setResultsSig(null);
+    setPage(1);
+    setPhase("idle");
+    if (imageInputRef.current) imageInputRef.current.value = "";
+    if (appInputRef.current) appInputRef.current.value = "";
+  }
+
+  const ranked = items
+    ? [...items.keys()].sort((a, b) => RANK_ORDER[itemKey(items[a])] - RANK_ORDER[itemKey(items[b])])
+    : [];
+  const counts = { fail: 0, error: 0, needs_review: 0, pass: 0 };
+  items?.forEach((it) => (counts[itemKey(it) as keyof typeof counts] += 1));
+  const overallTone =
+    counts.fail || counts.error
+      ? "border-red-200 bg-fail-soft text-red-900"
+      : counts.needs_review
+        ? "border-amber-200 bg-review-soft text-amber-900"
+        : "border-emerald-200 bg-pass-soft text-emerald-900";
+  const nPages = Math.max(1, Math.ceil(ranked.length / PAGE_SIZE));
+
+  return (
+    <div className="space-y-6">
+      {!items && !running && (
+        <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+          <span className="font-semibold">How it works</span> — 1. Upload all the label
+          photos. 2. Add the application data file if you have one. 3. Click{" "}
+          <span className="font-semibold">Screen products</span>. Products without
+          application data are screened against the fixed rules only.
+        </div>
+      )}
+
+      <section
+        aria-labelledby="batch-upload-heading"
+        className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+      >
+        <h2 id="batch-upload-heading" className="text-base font-semibold text-slate-900">
+          Batch upload
+        </h2>
+        <p className="mt-1 text-sm text-slate-500">
+          Name each product&apos;s photos with the same beginning plus _front / _back —
+          e.g. <span className="font-medium">oldtom_front.jpg</span> and{" "}
+          <span className="font-medium">oldtom_back.jpg</span> are read together as one
+          product. Files named like IMG_1234.jpg are each treated as a separate product.
+        </p>
+
+        <button
+          type="button"
+          disabled={running}
+          onClick={() => imageInputRef.current?.click()}
+          onDragOver={(e) => {
+            e.preventDefault();
+            if (!running) setDragging(true);
+          }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDragging(false);
+            if (running) return;
+            addFiles(e.dataTransfer.files);
+          }}
+          className={`mt-4 flex w-full flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed px-4 py-7 text-center transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600 disabled:opacity-50 ${
+            dragging
+              ? "border-blue-500 bg-blue-50"
+              : "border-slate-300 bg-white hover:border-blue-400 hover:bg-slate-50"
+          }`}
+        >
+          <span className="text-sm font-medium text-slate-700">
+            Drop label images here or <span className="text-blue-700">browse</span>
+          </span>
+          <span className="text-xs text-slate-500">
+            PNG, JPEG, or WebP — add as many products as you like
+          </span>
+        </button>
+        <input
+          ref={imageInputRef}
+          type="file"
+          accept={ACCEPTED_IMAGE_TYPES.join(",")}
+          multiple
+          className="sr-only"
+          aria-hidden="true"
+          tabIndex={-1}
+          onChange={(e) => {
+            addFiles(e.target.files);
+            e.target.value = "";
+          }}
+        />
+
+        {files.length > 0 && (
+          <ul className="mt-3 flex flex-wrap gap-2">
+            {files.map((f, i) => (
+              <li
+                key={fileKey(f)}
+                className="flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 py-1 pl-3 pr-1 text-xs text-slate-700"
+              >
+                {f.name}
+                <button
+                  type="button"
+                  aria-label={`Remove ${f.name}`}
+                  disabled={running}
+                  onClick={() => setFiles((prev) => prev.filter((_, j) => j !== i))}
+                  className="rounded-full px-1.5 py-0.5 font-semibold text-slate-500 hover:bg-slate-200 hover:text-red-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600"
+                >
+                  ×
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <label className="mt-4 flex items-center gap-2 text-sm text-slate-700">
+          <input
+            type="checkbox"
+            checked={groupPairs}
+            disabled={running}
+            onChange={(e) => setGroupPairs(e.target.checked)}
+            className="h-4 w-4 rounded border-slate-300 text-blue-700 focus:ring-blue-600"
+          />
+          Group front/back images of one product by filename
+        </label>
+
+        <div className="mt-5 border-t border-slate-100 pt-4">
+          <label htmlFor="batch-app-file" className="block text-sm font-medium text-slate-700">
+            Application data (optional, CSV or JSON)
+          </label>
+          <p className="mt-1 text-xs text-slate-500">
+            One row/entry per product; the <span className="font-semibold">product</span>{" "}
+            value must match the shared beginning of that product&apos;s file names
+            (capitalization ignored). Columns: <span className="font-semibold">product</span>{" "}
+            (required) plus any of {APP_FIELDS.join(", ")}.
+          </p>
+          <input
+            id="batch-app-file"
+            ref={appInputRef}
+            type="file"
+            accept=".csv,.json"
+            disabled={running}
+            onChange={(e) => {
+              onAppFile(e.target.files?.[0] ?? null);
+              e.target.value = ""; // allow re-selecting the same (edited) file
+            }}
+            className="mt-2 block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-50 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-blue-700 hover:file:bg-blue-100"
+          />
+          {apps?.error && (
+            <p role="alert" className="mt-2 rounded-lg bg-review-soft px-3 py-2 text-sm text-amber-900">
+              Could not use the application file ({apps.error}) — all products will be
+              screened against the fixed rules only.
+            </p>
+          )}
+          {apps && !apps.error && (
+            <div className="mt-2 space-y-1">
+              {apps.warnings.map((w, i) => (
+                <p key={i} className="rounded-lg bg-review-soft px-3 py-2 text-sm text-amber-900">
+                  Application file: {w}
+                </p>
+              ))}
+              <p className="text-xs text-slate-500">
+                Application data loaded for {Object.keys(apps.mapping).length} product(s)
+                {appFileName && <> from {appFileName}</>}.{" "}
+                <button
+                  type="button"
+                  disabled={running}
+                  onClick={() => {
+                    setApps(null);
+                    setAppFileName(null);
+                    if (appInputRef.current) appInputRef.current.value = "";
+                  }}
+                  className="font-medium text-blue-700 underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600"
+                >
+                  Remove file
+                </button>{" "}
+                (reverts to rules-only screening).
+              </p>
+            </div>
+          )}
+        </div>
+
+        {products.length > 0 && (
+          <div className="mt-4">
+            <p className="text-sm text-slate-600">
+              {products.length} product(s) from {files.length} file(s):
+            </p>
+            <div className="mt-2 overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
+                    <th className="py-1.5 pr-4 font-semibold">Product</th>
+                    <th className="py-1.5 pr-4 font-semibold">Files</th>
+                    <th className="py-1.5 font-semibold">Application data</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {products.map((p, i) => (
+                    <tr key={i} className="border-b border-slate-100 text-slate-700">
+                      <td className="py-1.5 pr-4 font-medium">{p.label}</td>
+                      <td className="py-1.5 pr-4">{p.files.map((f) => f.name).join(", ")}</td>
+                      <td className="py-1.5">
+                        {rowFor(p.label)
+                          ? "matched"
+                          : p.label.toLowerCase() in mapping
+                            ? "row found but empty"
+                            : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {unusedAppRows.length > 0 && (
+              <p className="mt-2 rounded-lg bg-review-soft px-3 py-2 text-sm text-amber-900">
+                {unusedAppRows.length} application row(s) match no uploaded product:{" "}
+                {unusedAppRows.slice(0, 8).join(", ")}
+                {unusedAppRows.length > 8 && "…"} — check the &apos;product&apos; values if
+                this is unexpected.
+              </p>
+            )}
+            {oversizeProducts.length > 0 && (
+              <p className="mt-2 rounded-lg bg-review-soft px-3 py-2 text-sm text-amber-900">
+                {oversizeProducts.length} product(s) have more than {MAX_IMAGES_PER_PRODUCT}{" "}
+                files and will fail to screen:{" "}
+                {oversizeProducts.map((p) => `${p.label} (${p.files.length})`).join(", ")} —
+                remove extra files or rename them to separate products.
+              </p>
+            )}
+          </div>
+        )}
+      </section>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          onClick={handleScreen}
+          disabled={products.length === 0 || running}
+          className="inline-flex items-center gap-2 rounded-xl bg-blue-700 px-6 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+        >
+          {running && (
+            <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4 animate-spin">
+              <circle cx="12" cy="12" r="10" className="stroke-white/30" strokeWidth="4" fill="none" />
+              <path d="M22 12a10 10 0 0 0-10-10" className="stroke-white" strokeWidth="4" fill="none" strokeLinecap="round" />
+            </svg>
+          )}
+          {running
+            ? "Screening…"
+            : products.length > 0
+              ? `Screen ${products.length} product(s)`
+              : "Screen products"}
+        </button>
+        <button
+          type="button"
+          onClick={handleClear}
+          className="rounded-xl px-4 py-3 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-700"
+        >
+          {running ? "Cancel" : "Clear batch"}
+        </button>
+      </div>
+
+      <p aria-live="polite" role="status" className="sr-only">
+        {announcement}
+      </p>
+
+      {running && progress && (
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={progress.total}
+            aria-valuenow={progress.done}
+            aria-label="Batch screening progress"
+            className="h-2 w-full overflow-hidden rounded-full bg-slate-100"
+          >
+            <div
+              className="h-full rounded-full bg-blue-600 transition-all"
+              style={{ width: `${(progress.done / progress.total) * 100}%` }}
+            />
+          </div>
+          <p className="mt-2 text-sm text-slate-600">
+            Processed {progress.done}/{progress.total}
+            {progress.done > 0 && <> — {progress.current}</>}
+          </p>
+        </div>
+      )}
+
+      <div ref={resultsRef} className="scroll-mt-6">
+        {items && (
+          <section aria-label="Batch results" className="space-y-4">
+            {resultsSig !== currentSig && (
+              <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                <span className="font-semibold">Inputs changed:</span> the results below are
+                from a previous screening and may not match the files, grouping, or
+                application data currently set above — click Screen to refresh, or Clear to
+                start over.
+              </p>
+            )}
+            <div className={`rounded-xl border p-5 ${overallTone}`}>
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <h2 id="batch-results-heading" tabIndex={-1} className="text-lg font-bold outline-none">
+                  Screened {items.length} product(s)
+                </h2>
+                <p className="text-sm font-medium opacity-80">
+                  {counts.fail} fail · {counts.needs_review} needs review · {counts.pass} pass
+                  · {counts.error} error{elapsed != null && <> · {elapsed}s total</>}
+                </p>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
+                    <th className="px-4 py-2.5 font-semibold">Product</th>
+                    <th className="px-4 py-2.5 font-semibold">Files</th>
+                    <th className="px-4 py-2.5 font-semibold">Result</th>
+                    <th className="px-4 py-2.5 font-semibold">Gov. warning</th>
+                    <th className="px-4 py-2.5 font-semibold">Application data</th>
+                    <th className="px-4 py-2.5 font-semibold">Flagged fields</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ranked.map((i) => {
+                    const item = items[i];
+                    const isError = itemKey(item) === "error";
+                    const warn = item.result?.fields.find(
+                      (f) => f.field === "government_warning",
+                    );
+                    const flags =
+                      item.result?.fields
+                        .filter((f) => f.status !== "pass")
+                        .map((f) => f.field.replace(/_/g, " ")) ?? [];
+                    return (
+                      <tr key={i} className="border-b border-slate-100 align-top text-slate-700">
+                        <td className="px-4 py-2 font-medium">{item.label}</td>
+                        <td className="px-4 py-2">{item.fileNames.join(", ")}</td>
+                        <td className="px-4 py-2">
+                          {isError ? "Error" : STATUS_LABEL[item.result!.overall]}
+                        </td>
+                        <td className="px-4 py-2">
+                          {warn ? STATUS_LABEL[warn.status] : "—"}
+                        </td>
+                        <td className="px-4 py-2">{item.matched ? "matched" : "—"}</td>
+                        <td className="px-4 py-2">
+                          {isError
+                            ? errorShort(item.errorKind)
+                            : flags.length > 0
+                              ? flags.join(", ")
+                              : "—"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-base font-semibold text-slate-900">Per-product detail</h3>
+                {nPages > 1 && (
+                  <label className="flex items-center gap-2 text-sm text-slate-600">
+                    Detail page
+                    <select
+                      value={page}
+                      onChange={(e) => setPage(Number(e.target.value))}
+                      className="rounded-lg border border-slate-300 px-2 py-1 text-sm"
+                    >
+                      {Array.from({ length: nPages }, (_, p) => (
+                        <option key={p + 1} value={p + 1}>
+                          Page {p + 1} of {nPages}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+              </div>
+              <div className="mt-3 space-y-3">
+                {ranked.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((i) => {
+                  const item = items[i];
+                  const isError = itemKey(item) === "error";
+                  const status = isError ? "Error" : STATUS_LABEL[item.result!.overall];
+                  const product = runProducts[i];
+                  return (
+                    <details
+                      key={i}
+                      className="group rounded-2xl border border-slate-200 bg-white shadow-sm"
+                    >
+                      <summary className="cursor-pointer select-none rounded-2xl px-4 py-3 text-sm font-medium text-slate-800 hover:bg-slate-50">
+                        {item.label} — {status} ({item.fileNames.join(", ")})
+                      </summary>
+                      <div className="border-t border-slate-100 px-4 py-4">
+                        {isError ? (
+                          <p role="alert" className="rounded-lg bg-fail-soft px-3 py-2 text-sm text-red-900">
+                            {item.errorMessage}
+                          </p>
+                        ) : (
+                          <ProductReport result={item.result!} elapsed={item.seconds} />
+                        )}
+                        {!isError && product && (
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {product.files.map((f) => (
+                              <FileThumb key={fileKey(f)} file={f} alt={`Uploaded image ${f.name}`} />
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </details>
+                  );
+                })}
+              </div>
+            </div>
+          </section>
+        )}
+      </div>
+    </div>
+  );
+}

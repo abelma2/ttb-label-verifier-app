@@ -8,7 +8,8 @@
     "dev:api": "uvicorn api.index:app --reload --port 8000",
     "build": "next build",
     "start": "next start",
-    "test:api": "pytest tests/test_api.py -q"
+    "test:api": "pytest tests/test_api.py -q",
+    "test:web": "node --experimental-strip-types --test src/lib/__tests__/batch-lib.test.mts src/lib/__tests__/run-batch.test.mts"
   },
   "dependencies": {
     "next": "^15.3.0",

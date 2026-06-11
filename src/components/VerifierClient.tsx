@@ -1,8 +1,10 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ApplicationData, VerifyResponse } from "@/lib/types";
 import { cleanApplication, verifyLabel, VerifyError } from "@/lib/api";
+import { parseApplications, pickApplicationRow, type ParsedApplications } from "@/lib/applications";
+import { stem } from "@/lib/stem";
 import ApplicationForm from "./ApplicationForm";
 import ResultsView, { RESULTS_HEADING_ID } from "./ResultsView";
 import UploadSlot from "./UploadSlot";
@@ -23,8 +25,31 @@ export default function VerifierClient() {
   const [result, setResult] = useState<VerifyResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState("");
+  const [prefill, setPrefill] = useState<{ name: string; parsed: ParsedApplications } | null>(null);
+  const [prefillMessage, setPrefillMessage] = useState<string | null>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const prefillInputRef = useRef<HTMLInputElement>(null);
+
+  // Re-run the prefill match whenever the parsed file OR the front image
+  // changes (mirrors app.py's `file_id|stem` gate — fixed there after a review
+  // finding: matching only at file-selection time left the form permanently
+  // unfilled when the file arrived before the image, and silently kept product
+  // A's values after the image was swapped to product B).
+  useEffect(() => {
+    if (!prefill) return;
+    const { mapping, error, warnings } = prefill.parsed;
+    if (error) {
+      setPrefillMessage(`Could not use the application file (${error}).`);
+      return;
+    }
+    const { row, message } = pickApplicationRow(mapping, front ? stem(front.name) : null);
+    if (row) {
+      setApplication((prev) => ({ ...prev, ...row }));
+    }
+    const warningText = warnings.length > 0 ? ` ${warnings.join("; ")}.` : "";
+    setPrefillMessage(`Application file: ${message}.${warningText}`);
+  }, [prefill, front]);
 
   const verifying = phase === "verifying";
   const appValues = cleanApplication(application);
@@ -39,6 +64,8 @@ export default function VerifierClient() {
     setAnnouncement("Reading the label, this typically takes five to ten seconds.");
     try {
       const response = await verifyLabel(front, back, appValues, controller.signal);
+      // a late completion after Start over / a newer verify must not clobber state
+      if (abortRef.current !== controller) return;
       setResult(response);
       setPhase("done");
       setAnnouncement(
@@ -50,6 +77,7 @@ export default function VerifierClient() {
         document.getElementById(RESULTS_HEADING_ID)?.focus({ preventScroll: true });
       });
     } catch (err) {
+      if (abortRef.current !== controller) return;
       if (err instanceof VerifyError && err.kind === "cancelled") {
         setPhase("idle");
         setAnnouncement("Verification cancelled.");
@@ -63,18 +91,33 @@ export default function VerifierClient() {
       setPhase("error");
       setAnnouncement(`Verification failed: ${message}`);
     } finally {
-      abortRef.current = null;
+      if (abortRef.current === controller) {
+        abortRef.current = null;
+      }
     }
   }
 
   function handleReset() {
     abortRef.current?.abort();
+    abortRef.current = null;
     setFront(null);
     setBack(null);
     setApplication({});
     setResult(null);
     setError(null);
+    setPrefill(null);
+    setPrefillMessage(null);
     setPhase("idle");
+    if (prefillInputRef.current) prefillInputRef.current.value = "";
+  }
+
+  /** Parse an application file (same format as the batch file) and keep it in
+   *  state — the match itself runs in the effect above so it re-attempts when
+   *  the front image changes. Values stay editable after prefill — the file is
+   *  the applicant's submission, so this remains an independent comparison. */
+  async function handlePrefillFile(file: File | null) {
+    if (!file) return;
+    setPrefill({ name: file.name, parsed: parseApplications(await file.text(), file.name) });
   }
 
   return (
@@ -135,6 +178,29 @@ export default function VerifierClient() {
           blank to screen against the fixed federal rules only — the form is never auto-filled
           from the label, so it stays an independent check.
         </p>
+        <div className="mt-3">
+          <label htmlFor="single-app-file" className="block text-sm font-medium text-slate-700">
+            Prefill from application file{" "}
+            <span className="font-normal text-slate-400">(optional, CSV or JSON)</span>
+          </label>
+          <p className="mt-0.5 text-xs text-slate-500">
+            Same format as the batch application file; the row whose &apos;product&apos; value
+            matches the front image&apos;s filename stem is used.
+          </p>
+          <input
+            id="single-app-file"
+            ref={prefillInputRef}
+            type="file"
+            accept=".csv,.json"
+            disabled={verifying}
+            onChange={(e) => {
+              handlePrefillFile(e.target.files?.[0] ?? null);
+              e.target.value = ""; // allow re-selecting the same (edited) file
+            }}
+            className="mt-1.5 block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-50 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-blue-700 hover:file:bg-blue-100"
+          />
+          {prefillMessage && <p className="mt-1.5 text-xs text-slate-600">{prefillMessage}</p>}
+        </div>
         <div className="mt-4">
           <ApplicationForm values={application} disabled={verifying} onChange={setApplication} />
         </div>

@@ -1,6 +1,8 @@
-import type { ApplicationData, VerifyResponse } from "./types";
-import { APPLICATION_KEYS } from "./types";
-import { prepareImage } from "./image";
+// Explicit .ts extensions: see batch.ts — these modules also run under plain
+// Node for the unit tests.
+import type { ApplicationData, VerifyResponse } from "./types.ts";
+import { APPLICATION_KEYS } from "./types.ts";
+import { prepareImage } from "./image.ts";
 
 /** Mirrors the API's hard total-body cap so oversize uploads fail client-side
  *  with a friendly message instead of a platform-level 413. */
@@ -47,14 +49,38 @@ function deadlineSignal(external?: AbortSignal): AbortSignal | undefined {
   return external ?? timeout;
 }
 
+/** Mirrors the API's MAX_IMAGES so an oversized stem group fails client-side
+ *  with a friendly message instead of a 400. */
+export const MAX_IMAGES_PER_PRODUCT = 4;
+
 export async function verifyLabel(
   front: File,
   back: File | null,
   application: ApplicationData | null,
   signal?: AbortSignal,
 ): Promise<VerifyResponse> {
-  const images = [await prepareImage(front)];
-  if (back) images.push(await prepareImage(back));
+  return verifyImages(back ? [front, back] : [front], application, signal);
+}
+
+/** Verify ONE product from 1–4 label images (front/back/neck/strip), read
+ *  together as one label. Used directly by batch mode, where each product is
+ *  its own request (= its own serverless invocation). */
+export async function verifyImages(
+  files: File[],
+  application: ApplicationData | null,
+  signal?: AbortSignal,
+): Promise<VerifyResponse> {
+  if (files.length === 0) {
+    throw new VerifyError("no_images", "Upload at least one label image.");
+  }
+  if (files.length > MAX_IMAGES_PER_PRODUCT) {
+    throw new VerifyError(
+      "too_many_images",
+      `This product has ${files.length} files; the limit is ${MAX_IMAGES_PER_PRODUCT} images ` +
+        "per product (front, back/other, neck/strip).",
+    );
+  }
+  const images = await Promise.all(files.map(prepareImage));
 
   const total = images.reduce((sum, img) => sum + img.blob.size, 0);
   if (total > MAX_TOTAL_BYTES) {
@@ -69,6 +95,22 @@ export async function verifyLabel(
   for (const img of images) form.append("images", img.blob, img.name);
   if (application) form.append("application", JSON.stringify(application));
 
+  /** The signal also aborts body streaming, so both the fetch AND the body
+   *  read must map DOMExceptions to typed VerifyErrors — callers' control flow
+   *  depends on every rejection being a VerifyError. */
+  function classifyDomException(err: unknown): VerifyError | null {
+    if (err instanceof DOMException && err.name === "TimeoutError") {
+      return new VerifyError(
+        "timeout",
+        "Reading the label took too long and was cancelled. Try again, or upload a smaller image.",
+      );
+    }
+    if (err instanceof DOMException && err.name === "AbortError") {
+      return new VerifyError("cancelled", "Verification was cancelled.");
+    }
+    return null;
+  }
+
   let res: Response;
   try {
     res = await fetch("/api/py/verify", {
@@ -77,18 +119,12 @@ export async function verifyLabel(
       signal: deadlineSignal(signal),
     });
   } catch (err) {
-    if (err instanceof DOMException && err.name === "TimeoutError") {
-      throw new VerifyError(
-        "timeout",
-        "Reading the label took too long and was cancelled. Try again, or upload a smaller image.",
-      );
-    }
-    if (err instanceof DOMException && err.name === "AbortError") {
-      throw new VerifyError("cancelled", "Verification was cancelled.");
-    }
-    throw new VerifyError(
-      "network",
-      "Could not reach the verification service. Check your connection and try again.",
+    throw (
+      classifyDomException(err) ??
+      new VerifyError(
+        "network",
+        "Could not reach the verification service. Check your connection and try again.",
+      )
     );
   }
 
@@ -111,5 +147,12 @@ export async function verifyLabel(
     throw new VerifyError(kind, message, res.status);
   }
 
-  return (await res.json()) as VerifyResponse;
+  try {
+    return (await res.json()) as VerifyResponse;
+  } catch (err) {
+    throw (
+      classifyDomException(err) ??
+      new VerifyError("bad_response", "The verification service returned an unreadable reply.")
+    );
+  }
 }

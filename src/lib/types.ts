@@ -52,6 +52,50 @@ export interface AdditionalStatement {
   confidence: Confidence;
 }
 
+/** One extracted scalar field, per the engine's coerced schema. */
+export interface ExtractedField {
+  present: boolean;
+  value: string | null;
+  confidence: Confidence;
+}
+
+export interface AlcoholContentField extends ExtractedField {
+  abv_percent: number | null;
+  proof: number | null;
+}
+
+/** The model's warning OBSERVATIONS (evidence, not judgment). */
+export interface GovernmentWarningField {
+  present: boolean;
+  text: string | null;
+  header_all_caps: boolean | null;
+  header_bold: boolean | null;
+  header_bold_confidence: Confidence;
+  header_bold_basis: string | null;
+  body_bold: boolean | null;
+  body_bold_confidence: Confidence;
+  confidence: Confidence;
+}
+
+/** The engine's coerced extraction (api/_models.py Extraction). */
+export interface Extraction {
+  beverage_type: string;
+  brand_name: ExtractedField;
+  fanciful_name: ExtractedField;
+  class_type: ExtractedField;
+  statement_of_composition: ExtractedField;
+  net_contents: ExtractedField;
+  name_and_address: ExtractedField;
+  country_of_origin: ExtractedField;
+  appellation: ExtractedField;
+  vintage: ExtractedField;
+  sulfite_declaration: ExtractedField;
+  alcohol_content: AlcoholContentField;
+  government_warning: GovernmentWarningField;
+  additional_statements: AdditionalStatement[];
+  image_quality_notes: string | null;
+}
+
 export interface VerifyResponse {
   mode: VerifyMode;
   overall: Status;
@@ -59,6 +103,7 @@ export interface VerifyResponse {
   fields: FieldVerdict[];
   additional_statements: AdditionalStatement[];
   image_quality_notes: string | null;
+  extracted: Extraction;
 }
 
 export interface ErrorResponse {

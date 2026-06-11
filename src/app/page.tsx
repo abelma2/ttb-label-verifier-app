@@ -1,3 +1,5 @@
+import BatchClient from "@/components/BatchClient";
+import Tabs from "@/components/Tabs";
 import VerifierClient from "@/components/VerifierClient";
 
 export default function Home() {
@@ -21,7 +23,12 @@ export default function Home() {
       </header>
 
       <main className="flex-1 py-8">
-        <VerifierClient />
+        <Tabs
+          tabs={[
+            { id: "single", label: "Single label", content: <VerifierClient /> },
+            { id: "batch", label: "Batch screening", content: <BatchClient /> },
+          ]}
+        />
       </main>
 
       <footer className="border-t border-slate-200 py-6">
