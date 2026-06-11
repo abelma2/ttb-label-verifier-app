@@ -27,7 +27,8 @@ artifacts/
 
 # --- Dev tooling & evidence: kept LOCAL-ONLY on main (full tracked set lives on
 # the dev-archive branch). The repo's main branch carries only what a user needs
-# to download and run the app.
+# to download and run the app. Locally it all lives under private/.
+private/
 test_labels/
 BENCHMARK_NOTES.md
 CLAUDE.md

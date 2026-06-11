@@ -15,6 +15,7 @@ node_modules/
 .streamlit/
 
 # Test data, fixtures, harnesses, experiments, demo assets
+private/
 adversarial/
 bold_safety/
 eval/
