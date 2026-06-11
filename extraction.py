@@ -402,7 +402,7 @@ _CONF = {"high", "medium", "low"}
 
 
 def _conf(value) -> str:
-    return value if value in _CONF else "low"
+    return value if isinstance(value, str) and value in _CONF else "low"
 
 
 def _field(raw, extra=None) -> dict:

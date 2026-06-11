@@ -891,6 +891,25 @@ def test_coerce_new_conditional_fields_pass_through_values():
     assert bad["fanciful_name"]["confidence"] == "low"
 
 
+def test_coerce_unhashable_confidence_normalizes_to_low():
+    # a non-hashable confidence value (list/dict) must normalize to "low", not raise
+    # TypeError from the set-membership test — reachable on the json_object fallback path
+    out = _coerce({
+        "brand_name": {"present": True, "value": "X", "confidence": []},
+        "alcohol_content": {"present": True, "value": "40% ABV", "confidence": {}},
+        "government_warning": {"present": True, "text": "x", "confidence": [],
+                               "header_bold_confidence": {}, "body_bold_confidence": ["high"]},
+        "additional_statements": [{"value": "AGED 4 YEARS", "confidence": {}}],
+    })
+    assert out["brand_name"]["confidence"] == "low"
+    assert out["alcohol_content"]["confidence"] == "low"
+    gw = out["government_warning"]
+    assert gw["confidence"] == "low"
+    assert gw["header_bold_confidence"] == "low"
+    assert gw["body_bold_confidence"] == "low"
+    assert out["additional_statements"][0]["confidence"] == "low"
+
+
 def test_coerce_normalizes_string_additional_statements():
     out = _coerce({"additional_statements": ["CONTAINS SULFITES", {"value": "AGED 4 YEARS"}]})
     assert out["additional_statements"][0]["value"] == "CONTAINS SULFITES"
