@@ -1,0 +1,5 @@
+# Local development & test tooling (not deployed).
+-r requirements.txt
+uvicorn>=0.30,<1.0   # local API server (Vercel provides its own ASGI runtime)
+pytest>=8.0,<9.0
+httpx>=0.27,<1.0     # FastAPI TestClient transport
