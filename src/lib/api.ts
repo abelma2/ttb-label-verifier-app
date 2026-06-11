@@ -34,10 +34,24 @@ export function cleanApplication(values: ApplicationData): ApplicationData | nul
   return any ? out : null;
 }
 
+/** Client-side deadline, slightly above the server's ceilings (engine request
+ *  timeout 30 s, function maxDuration 60 s) so it can never mask a real 504. */
+const FETCH_TIMEOUT_MS = 75_000;
+
+function deadlineSignal(external?: AbortSignal): AbortSignal | undefined {
+  const timeout =
+    typeof AbortSignal.timeout === "function" ? AbortSignal.timeout(FETCH_TIMEOUT_MS) : undefined;
+  if (external && timeout && typeof AbortSignal.any === "function") {
+    return AbortSignal.any([external, timeout]);
+  }
+  return external ?? timeout;
+}
+
 export async function verifyLabel(
   front: File,
   back: File | null,
   application: ApplicationData | null,
+  signal?: AbortSignal,
 ): Promise<VerifyResponse> {
   const images = [await prepareImage(front)];
   if (back) images.push(await prepareImage(back));
@@ -57,8 +71,21 @@ export async function verifyLabel(
 
   let res: Response;
   try {
-    res = await fetch("/api/py/verify", { method: "POST", body: form });
-  } catch {
+    res = await fetch("/api/py/verify", {
+      method: "POST",
+      body: form,
+      signal: deadlineSignal(signal),
+    });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "TimeoutError") {
+      throw new VerifyError(
+        "timeout",
+        "Reading the label took too long and was cancelled. Try again, or upload a smaller image.",
+      );
+    }
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new VerifyError("cancelled", "Verification was cancelled.");
+    }
     throw new VerifyError(
       "network",
       "Could not reach the verification service. Check your connection and try again.",

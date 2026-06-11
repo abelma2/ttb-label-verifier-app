@@ -11,7 +11,7 @@ models; change them together.
 """
 from typing import Literal, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 Status = Literal["pass", "needs_review", "fail"]
 Confidence = Literal["high", "medium", "low"]
@@ -47,7 +47,11 @@ class ApplicationData(BaseModel):
 
 
 class FieldVerdict(BaseModel):
-    """Serialized verification.FieldResult."""
+    """Serialized verification.FieldResult.
+
+    `cause` values "absence"/"wording"/"caps"/"bold" come from the
+    government-warning check; "low_confidence" may appear on ANY field whose
+    passing read was downgraded to needs_review (verification._escalate)."""
     field: str
     status: Status
     reason: str
@@ -62,6 +66,16 @@ class AdditionalStatement(BaseModel):
     value: str
     kind: Optional[str] = None
     confidence: Confidence = "low"
+
+    @field_validator("kind", mode="before")
+    @classmethod
+    def _coerce_kind(cls, v):
+        """Under the engine's json_object fallback (models without Structured
+        Outputs) the model may emit a non-string kind, which extraction._coerce
+        passes through raw — coerce instead of crashing response serialization."""
+        if v is None or isinstance(v, str):
+            return v
+        return str(v)
 
 
 class VerifyResponse(BaseModel):

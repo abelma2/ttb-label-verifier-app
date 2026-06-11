@@ -31,6 +31,9 @@ test_labels/*
 !test_labels/applications/
 !test_labels/applications/*.json
 
+# --- Local tooling state ---------------------------------------------------------
+.claude/
+
 # --- OS noise ------------------------------------------------------------------
 .DS_Store
 Thumbs.db

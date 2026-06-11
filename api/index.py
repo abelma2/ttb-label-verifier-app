@@ -7,11 +7,13 @@ modules at the repo root are the source of truth and are imported untouched.
 
 Import strategy (deliberate): the engine stays at the repo root (it is shared
 with the Streamlit app, the test suite, and the eval/benchmark harnesses), and
-this file puts the root on sys.path before importing it. On Vercel the root
-modules are bundled into the function via vercel.json's `includeFiles`; locally
-and in tests the same two-line bootstrap resolves them. We chose this over
-copying the engine into api/ (a drift hazard: two copies of regulatory logic)
-and over packaging it (pyproject + src layout — more moving parts than a
+this file puts the root on sys.path before importing it. On Vercel the Python
+builder bundles ALL project files not excluded by .vercelignore into the
+function by default (it honors `excludeFiles` only — there is no include knob),
+so the root modules ship automatically; .vercelignore is what scopes the bundle.
+Locally and in tests the same two-line bootstrap resolves them. We chose this
+over copying the engine into api/ (a drift hazard: two copies of regulatory
+logic) and over packaging it (pyproject + src layout — more moving parts than a
 three-module engine warrants).
 
 Engine invariants preserved here:
@@ -36,6 +38,7 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
@@ -141,6 +144,36 @@ async def _validation_handler(_: Request, exc: RequestValidationError) -> JSONRe
     )
 
 
+@app.exception_handler(Exception)
+async def _unhandled_handler(_: Request, exc: Exception) -> JSONResponse:
+    """Catch-all so even an unexpected crash (e.g. in verify() or response
+    serialization) returns the documented {error:{kind,message}} envelope
+    instead of a bare text/plain 500."""
+    logger.exception("unhandled error: %s", exc)
+    status_code, message = _FAILURE_RESPONSES["unknown"]
+    return JSONResponse(
+        status_code=status_code,
+        content=ErrorResponse(error=ErrorBody(kind="unknown", message=message)).model_dump(),
+    )
+
+
+def _strip_phantom_422(openapi_fn):
+    """FastAPI auto-documents a 422 on every route, but our validation handler
+    remaps all validation failures to 400 — so a 422 can never occur. Strip it
+    from the generated schema so /api/py/docs matches real behavior."""
+    def wrapped():
+        schema = openapi_fn()
+        for path in schema.get("paths", {}).values():
+            for operation in path.values():
+                if isinstance(operation, dict):
+                    operation.get("responses", {}).pop("422", None)
+        return schema
+    return wrapped
+
+
+app.openapi = _strip_phantom_422(app.openapi)
+
+
 def _parse_application(raw: str | None) -> dict:
     """Parse the optional application-data form field into the dict verify()
     expects. Returns {} for absent/blank input (-> rules-only screening)."""
@@ -174,14 +207,16 @@ async def _read_validated_images(images: list[UploadFile]) -> list[tuple[bytes, 
     pairs: list[tuple[bytes, str]] = []
     total = 0
     for upload in images:
-        data = await upload.read()
+        # Bounded read: read(limit+1) proves oversize without buffering a huge
+        # body into memory (matters on the dev path, where no platform cap exists).
+        data = await upload.read(MAX_FILE_BYTES + 1)
         name = upload.filename or "image"
         if not data:
             raise ApiError(400, "empty_file", f"'{name}' is empty.")
         if len(data) > MAX_FILE_BYTES:
             raise ApiError(413, "file_too_large",
-                           f"'{name}' is {len(data) / 1024 / 1024:.1f} MB; the limit is "
-                           f"{MAX_FILE_BYTES // (1024 * 1024)} MB per image.")
+                           f"'{name}' exceeds the {MAX_FILE_BYTES // (1024 * 1024)} MB "
+                           f"per-image limit.")
         total += len(data)
         if total > MAX_TOTAL_BYTES:
             raise ApiError(413, "payload_too_large",
@@ -219,7 +254,12 @@ async def verify_label(
 
     try:
         # The extractor sees only the images — never app_values (engine invariant).
-        extracted = extract_fields(pairs)
+        # run_in_threadpool: the engine's OpenAI call is synchronous (and its 429
+        # backoff sleeps), so running it inline would block the event loop for the
+        # whole read — freezing concurrent requests locally and under Vercel's
+        # in-function concurrency. The engine is already used concurrently from
+        # threads by the Streamlit batch mode, so this is safe.
+        extracted = await run_in_threadpool(extract_fields, pairs)
     except Exception as exc:  # noqa: BLE001 — failure_kind classifies, we map to HTTP
         kind = failure_kind(exc)
         status_code, message = _FAILURE_RESPONSES.get(kind, _FAILURE_RESPONSES["unknown"])

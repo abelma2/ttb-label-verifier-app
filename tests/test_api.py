@@ -216,4 +216,70 @@ def test_extraction_failure_maps_to_502(monkeypatch):
     assert r.status_code == 502
     body = r.json()["error"]
     assert body["kind"] == "bad_response"
-    assert "label" not in body["message"].lower() or "image" in body["message"].lower()
+    # the envelope must carry the curated message, never the raw exception text
+    assert body["message"] == api_index._FAILURE_RESPONSES["bad_response"][1]
+
+
+def test_unexpected_crash_still_returns_error_envelope(monkeypatch):
+    """A crash AFTER extraction (e.g. in verify()) must still produce the
+    documented {error:{kind,message}} JSON envelope, not a text/plain 500."""
+    monkeypatch.setattr(api_index, "extract_fields",
+                        lambda images, media_type="image/png": compliant_extraction())
+    monkeypatch.setattr(api_index, "verify_label_only",
+                        lambda extracted: (_ for _ in ()).throw(RuntimeError("boom")))
+    crashing_client = TestClient(api_index.app, raise_server_exceptions=False)
+    r = crashing_client.post("/api/py/verify",
+                             files=[("images", ("front.png", PNG, "image/png"))])
+    assert r.status_code == 500
+    body = r.json()["error"]
+    assert body["kind"] == "unknown"
+    assert body["message"] == api_index._FAILURE_RESPONSES["unknown"][1]
+
+
+def test_extraction_runs_off_the_event_loop(monkeypatch):
+    """The engine's OpenAI call is synchronous; the endpoint must run it in the
+    threadpool so a slow read doesn't freeze concurrent requests (uvicorn dev,
+    Vercel in-function concurrency). A blocking /verify is started, then /health
+    is called while it is still in flight — health must answer first."""
+    import asyncio
+    import threading
+    import time
+
+    from httpx import ASGITransport, AsyncClient
+
+    started = threading.Event()
+
+    def slow_extract(images, media_type="image/png"):
+        started.set()
+        time.sleep(0.6)
+        return compliant_extraction()
+
+    monkeypatch.setattr(api_index, "extract_fields", slow_extract)
+
+    async def scenario():
+        transport = ASGITransport(app=api_index.app)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            verify_task = asyncio.create_task(
+                ac.post("/api/py/verify",
+                        files=[("images", ("front.png", PNG, "image/png"))]))
+            await asyncio.to_thread(started.wait, 5)   # extraction is now in flight
+            t0 = time.monotonic()
+            health = await ac.get("/api/py/health")
+            health_latency = time.monotonic() - t0
+            verify = await verify_task
+            return health.status_code, health_latency, verify.status_code
+
+    health_status, health_latency, verify_status = asyncio.run(scenario())
+    assert health_status == 200 and verify_status == 200
+    assert health_latency < 0.5, (
+        f"/health took {health_latency:.2f}s while an extraction was in flight — "
+        "the model call is blocking the event loop")
+
+
+def test_phantom_422_stripped_from_openapi():
+    """Validation errors are remapped to 400, so the generated docs must not
+    advertise FastAPI's default 422."""
+    schema = api_index.app.openapi()
+    verify_responses = schema["paths"]["/api/py/verify"]["post"]["responses"]
+    assert "422" not in verify_responses
+    assert "400" in verify_responses

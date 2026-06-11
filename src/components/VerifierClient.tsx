@@ -4,10 +4,16 @@ import { useRef, useState } from "react";
 import type { ApplicationData, VerifyResponse } from "@/lib/types";
 import { cleanApplication, verifyLabel, VerifyError } from "@/lib/api";
 import ApplicationForm from "./ApplicationForm";
-import ResultsView from "./ResultsView";
+import ResultsView, { RESULTS_HEADING_ID } from "./ResultsView";
 import UploadSlot from "./UploadSlot";
 
 type Phase = "idle" | "verifying" | "done" | "error";
+
+const OVERALL_ANNOUNCEMENT: Record<string, string> = {
+  pass: "no issues found",
+  needs_review: "needs human review",
+  fail: "failed verification",
+};
 
 export default function VerifierClient() {
   const [front, setFront] = useState<File | null>(null);
@@ -16,32 +22,53 @@ export default function VerifierClient() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [result, setResult] = useState<VerifyResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [announcement, setAnnouncement] = useState("");
   const resultsRef = useRef<HTMLDivElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   const verifying = phase === "verifying";
   const appValues = cleanApplication(application);
 
   async function handleVerify() {
     if (!front || verifying) return;
+    const controller = new AbortController();
+    abortRef.current = controller;
     setPhase("verifying");
     setError(null);
     setResult(null);
+    setAnnouncement("Reading the label, this typically takes five to ten seconds.");
     try {
-      const response = await verifyLabel(front, back, appValues);
+      const response = await verifyLabel(front, back, appValues, controller.signal);
       setResult(response);
       setPhase("done");
-      requestAnimationFrame(() => resultsRef.current?.scrollIntoView({ block: "start" }));
+      setAnnouncement(
+        `Verification complete: ${OVERALL_ANNOUNCEMENT[response.overall] ?? response.overall}. ` +
+          `${response.fields.length} fields checked.`,
+      );
+      requestAnimationFrame(() => {
+        resultsRef.current?.scrollIntoView({ block: "start" });
+        document.getElementById(RESULTS_HEADING_ID)?.focus({ preventScroll: true });
+      });
     } catch (err) {
-      setError(
+      if (err instanceof VerifyError && err.kind === "cancelled") {
+        setPhase("idle");
+        setAnnouncement("Verification cancelled.");
+        return;
+      }
+      const message =
         err instanceof VerifyError
           ? err.message
-          : "Something went wrong while verifying the label. Please try again.",
-      );
+          : "Something went wrong while verifying the label. Please try again.";
+      setError(message);
       setPhase("error");
+      setAnnouncement(`Verification failed: ${message}`);
+    } finally {
+      abortRef.current = null;
     }
   }
 
   function handleReset() {
+    abortRef.current?.abort();
     setFront(null);
     setBack(null);
     setApplication({});
@@ -131,21 +158,23 @@ export default function VerifierClient() {
         <button
           type="button"
           onClick={handleReset}
-          disabled={verifying}
-          className="rounded-xl px-4 py-3 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-700 disabled:opacity-50"
+          className="rounded-xl px-4 py-3 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-700"
         >
-          Start over
+          {verifying ? "Cancel" : "Start over"}
         </button>
         {!front && <p className="text-sm text-slate-500">Add a front label image to begin.</p>}
       </div>
 
-      {/* aria-live region announces progress and results to screen readers */}
-      <div ref={resultsRef} aria-live="polite" className="scroll-mt-6">
+      {/* Small dedicated live region: announces one-line progress/outcome only.
+          The full results render OUTSIDE it so screen readers aren't read the
+          entire report as one announcement. */}
+      <p aria-live="polite" role="status" className="sr-only">
+        {announcement}
+      </p>
+
+      <div ref={resultsRef} className="scroll-mt-6">
         {verifying && (
-          <div
-            role="status"
-            className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm"
-          >
+          <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
             <p className="text-sm font-medium text-slate-700">
               Reading the label with the vision model…
             </p>

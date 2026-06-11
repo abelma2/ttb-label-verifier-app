@@ -37,6 +37,12 @@ export async function prepareImage(file: File): Promise<PreparedImage> {
     canvas.height = Math.max(1, Math.round(bitmap.height * scale));
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("canvas 2d context unavailable");
+    // JPEG has no alpha channel and a canvas is transparent by default, so a
+    // transparent label render (common for artwork proofs) would composite onto
+    // BLACK and could blank out dark text. Paint white first — matching how
+    // labels are physically printed.
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
     bitmap.close();
     const blob = await new Promise<Blob | null>((resolve) =>

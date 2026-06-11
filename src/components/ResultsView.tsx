@@ -17,6 +17,9 @@ const BANNER: Record<Status, { title: string; className: string }> = {
   },
 };
 
+/** Focus target after results render (keyboard/screen-reader users land here). */
+export const RESULTS_HEADING_ID = "results-heading";
+
 const LONG_TEXT_THRESHOLD = 160;
 
 function ValueBlock({ heading, value }: { heading: string; value: string }) {
@@ -81,7 +84,9 @@ export default function ResultsView({ result }: { result: VerifyResponse }) {
     <section aria-label="Verification results">
       <div className={`rounded-xl border p-5 ${banner.className}`}>
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h2 className="text-lg font-bold">{banner.title}</h2>
+          <h2 id={RESULTS_HEADING_ID} tabIndex={-1} className="text-lg font-bold outline-none">
+            {banner.title}
+          </h2>
           <p className="text-sm font-medium opacity-80">
             {result.fields.length} checks · {summary}
           </p>

@@ -31,6 +31,11 @@ export const APPLICATION_KEYS = [
   "country_of_origin",
 ] as const satisfies readonly (keyof ApplicationData)[];
 
+/** Machine-readable verdict cause. "absence"/"wording"/"caps"/"bold" are
+ *  emitted by the government-warning check; "low_confidence" may appear on ANY
+ *  field whose passing read was downgraded to needs_review. */
+export type VerdictCause = "absence" | "wording" | "caps" | "bold" | "low_confidence";
+
 /** Serialized verification.FieldResult. */
 export interface FieldVerdict {
   field: string;
@@ -38,9 +43,7 @@ export interface FieldVerdict {
   reason: string;
   extracted: string;
   expected: string;
-  /** Machine-readable verdict cause (government warning only):
-   *  "absence" | "wording" | "caps" | "bold" | "low_confidence". */
-  cause: string | null;
+  cause: VerdictCause | null;
 }
 
 export interface AdditionalStatement {

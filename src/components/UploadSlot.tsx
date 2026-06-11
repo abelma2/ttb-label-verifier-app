@@ -85,13 +85,17 @@ export default function UploadSlot({
           disabled={disabled}
           onClick={() => inputRef.current?.click()}
           onDragOver={(e) => {
+            // disabled suppresses click but NOT drag events — guard explicitly
+            // so a drop mid-verify can't swap the image out from under a
+            // result computed from the old one.
             e.preventDefault();
-            setDragging(true);
+            if (!disabled) setDragging(true);
           }}
           onDragLeave={() => setDragging(false)}
           onDrop={(e) => {
             e.preventDefault();
             setDragging(false);
+            if (disabled) return;
             accept(e.dataTransfer.files?.[0]);
           }}
           className={`flex w-full flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed px-4 py-8 text-center transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600 disabled:opacity-50 ${
@@ -111,11 +115,16 @@ export default function UploadSlot({
           </span>
         </button>
       )}
+      {/* Purely programmatic (the labeled dropzone button is the interaction
+          point): aria-hidden keeps screen readers from finding an unnamed
+          duplicate file control; tabIndex=-1 already removes it from the tab
+          order, so hiding it is safe. */}
       <input
         ref={inputRef}
         type="file"
         accept={ACCEPTED_IMAGE_TYPES.join(",")}
         className="sr-only"
+        aria-hidden="true"
         tabIndex={-1}
         onChange={(e) => {
           accept(e.target.files?.[0]);

@@ -3,6 +3,7 @@
 # extras live in requirements-streamlit.txt; dev/test tools in requirements-dev.txt).
 # Pinned with major-version caps so a cloud rebuild can't pull a breaking major.
 fastapi>=0.115,<1.0
+pydantic>=2,<3                 # imported directly by api/_models.py (v2-only API)
 python-multipart>=0.0.18,<0.1  # multipart parsing for FastAPI UploadFile
 openai>=1.50,<2.0
 rapidfuzz>=3.9,<4.0
