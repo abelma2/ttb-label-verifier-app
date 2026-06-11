@@ -3,7 +3,10 @@
 Verifies a U.S. alcohol beverage label (beer, wine, or distilled spirits) against the
 applicant's submitted values and the federal labeling rules (TTB / 27 CFR). Upload the
 label image(s) — front and back together — optionally enter the application values, and
-each field comes back **pass**, **needs review**, or **fail** with a reason.
+each field comes back **pass**, **needs review**, or **fail** with a reason. A **batch
+mode** screens many labels at once: files pair into products by filename stem
+(`oldtom_front.jpg` + `oldtom_back.jpg`), an optional CSV/JSON application file matches
+rows to products, and results land in a worst-first table with per-product detail.
 
 **Production web app:** Next.js (App Router) frontend + a thin FastAPI serverless
 function, deployed as one Vercel project. The original Streamlit prototype (`app.py`)
@@ -76,9 +79,26 @@ vercel.json           Python function config (maxDuration, includeFiles)
 - **Tailwind v3, not v4.** v4's native engine (lightningcss/oxide) ships no 32-bit
   Windows binaries and the dev machine runs 32-bit Node; v3 is pure JS with identical
   output for this UI. Swap to v4 if your toolchain is 64-bit.
-- **`requirements.txt` is the deploy manifest** (fastapi, python-multipart, openai,
-  rapidfuzz — no Streamlit). Dev/test tooling lives in `requirements-dev.txt`; the
-  Streamlit prototype's extras in `requirements-streamlit.txt`.
+- **`requirements.txt` is the deploy manifest** (fastapi, pydantic, python-multipart,
+  openai, rapidfuzz — no Streamlit). Dev/test tooling lives in `requirements-dev.txt`;
+  the Streamlit prototype's extras in `requirements-streamlit.txt`.
+- **Batch mode is client-side orchestration, not a batch endpoint.** The Streamlit app
+  fanned a batch out over a server-side thread pool; on serverless that shape fights both
+  the 4.5 MB body limit and the per-invocation duration cap. Instead the browser groups
+  files into products (same filename-stem convention as `app.py`/`smoke_test.py`), then
+  issues one `/api/py/verify` request per product with a small concurrency pool — each
+  product is its own serverless invocation, so the platform does the scaling and one bad
+  product becomes an error row, never a sunk batch. The grouping and application-file
+  parsing logic is a 1:1 TypeScript port of `app.py`'s (`src/lib/stem.ts`,
+  `src/lib/applications.ts`), pinned by unit tests run with Node's built-in test runner
+  (`npm run test:web` — no extra test toolchain for ~20 pure-function assertions).
+- **One deliberate non-port:** `app.py`'s "copy extracted values into the form"
+  convenience. The application must stay an independent witness; the web UI only accepts
+  applicant-supplied values (typed, or prefilled from an application file).
+- **Products are capped at 4 images** (front, back/other, neck/strip) — a consequence of
+  the 4.5 MB request budget that `app.py`'s single-server upload didn't have. The batch
+  preview flags any over-limit stem group *before* the run instead of letting it fail
+  mid-batch.
 
 ## Environment variables
 
@@ -113,6 +133,7 @@ Open http://localhost:3000. Interactive API docs: http://localhost:8000/api/py/d
 ```bash
 pytest                       # engine tests + API-layer tests
 npm run test:api             # just the API layer
+npm run test:web             # batch grouping / application-file parsing (node:test)
 ```
 
 **Legacy Streamlit prototype:**
