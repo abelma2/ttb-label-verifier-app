@@ -88,8 +88,10 @@ test("matched reflects whether a non-blank application row was passed", async ()
 
 test("aborting rejects the whole run with kind 'cancelled'", async () => {
   const controller = new AbortController();
+  // more products than workers, so workers must loop back to the abort check
+  // (in production the in-flight verifyImages calls also reject on abort)
   const run = runBatch(
-    Array.from({ length: 8 }, (_, i) => product(`p${i}`, `p${i}.jpg`)),
+    Array.from({ length: BATCH_CONCURRENCY + 4 }, (_, i) => product(`p${i}`, `p${i}.jpg`)),
     () => null,
     () => {},
     controller.signal,

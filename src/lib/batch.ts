@@ -14,11 +14,13 @@ import type { AppRow } from "./applications.ts";
 import type { Product } from "./stem.ts";
 import type { VerifyResponse } from "./types.ts";
 
-/** Concurrent in-flight requests. The Streamlit app used 8 server-side
- *  workers; in the browser, ~4 stays under typical per-origin connection
- *  limits and is gentler on the vision API's rate limits (the engine retries
- *  a burst 429, but not indefinitely). */
-export const BATCH_CONCURRENCY = 4;
+/** Concurrent in-flight requests — 8, matching the Streamlit app's
+ *  BATCH_MAX_WORKERS (a 10-product batch is 2 waves, not 3). The account's
+ *  rate limits leave ~50x headroom at this rate, and the engine's 429 backoff
+ *  remains as a safety net for smaller accounts. In local dev the browser's
+ *  ~6-connection HTTP/1.1 cap queues the extras harmlessly; on Vercel (HTTP/2)
+ *  all 8 run in parallel as separate function invocations. */
+export const BATCH_CONCURRENCY = 8;
 
 /** Short error labels for the results table (port of app.py's _ERROR_SHORT,
  *  extended with the client-side kinds). Full messages show in the detail view. */
