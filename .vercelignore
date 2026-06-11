@@ -14,13 +14,14 @@ node_modules/
 # Secrets & local config (defense in depth — also gitignored)
 .streamlit/
 
-# Test data, fixtures, harnesses, experiments
+# Test data, fixtures, harnesses, experiments, demo assets
 adversarial/
 bold_safety/
 eval/
 scripts/
 test_labels/
 tests/
+examples/
 
 # Run artifacts & scratch
 archive/

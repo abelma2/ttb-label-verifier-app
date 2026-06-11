@@ -1153,7 +1153,8 @@ def test_check_warning_cause_codes():
 
 
 def test_bold_prompt_is_deprimed_variant_a_style():
-    # Regression guard for the benchmark-validated variant-A wording (BENCHMARK_NOTES.md):
+    # Regression guard for the benchmark-validated variant-A wording (BENCHMARK_NOTES.md,
+    # dev-archive branch):
     # the 'darker' shortcut was the measured cause of all-bold-body false-passes, and the
     # de-prime clause is what cut high-confidence false-passes 14 -> 0. The bold-instruction
     # block in the extraction prompt must keep these properties.

@@ -169,10 +169,10 @@ def _stem(filename):
 
 def _group_uploads(files, group_pairs):
     """Turn uploaded files into a list of (label, [files]) products. With grouping on, files
-    that share a name stem (see _stem) are read together as one product (mirroring
-    scripts/smoke_test.py), so a front+back pair is screened as one label instead of
-    false-failing the front for the warning that lives on the back. With grouping off, each
-    file is its own product. Upload order is preserved."""
+    that share a name stem (see _stem) are read together as one product, so a front+back
+    pair is screened as one label instead of false-failing the front for the warning that
+    lives on the back. With grouping off, each file is its own product. Upload order is
+    preserved."""
     if not group_pairs:
         # each file is its own product, but the LABEL is still the stem so application-data
         # matching works with grouping off (review finding: raw filenames with extensions

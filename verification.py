@@ -773,7 +773,8 @@ def _check_warning(gw) -> FieldResult:
         return _escalate(result, gw.get("confidence"))
     if WARNING_BOLD_POLICY == "note":
         # Bold is telemetry, not a gate: surface the model's observation but never fail/review
-        # on it (benchmarks show bold isn't reliably machine-verifiable -- BENCHMARK_NOTES.md).
+        # on it (benchmarks show bold isn't reliably machine-verifiable -- BENCHMARK_NOTES.md,
+        # dev-archive branch).
         observed = {True: "model observed bold", False: "model observed NOT bold"}.get(
             gw.get("header_bold"), "bold not determinable")
         result = FieldResult("government_warning", text, GOVERNMENT_WARNING, PASS,

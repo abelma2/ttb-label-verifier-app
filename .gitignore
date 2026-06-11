@@ -25,13 +25,19 @@ output/
 archive/
 artifacts/
 
-# --- Label images are local-only test data (large / not redistributable). -----
-# Keep the typed application fixtures the eval and app compare against,
-# and the folder's own README (documentation, not an image).
-test_labels/*
-!test_labels/applications/
-!test_labels/applications/*.json
-!test_labels/README.txt
+# --- Dev tooling & evidence: kept LOCAL-ONLY on main (full tracked set lives on
+# the dev-archive branch). The repo's main branch carries only what a user needs
+# to download and run the app.
+test_labels/
+BENCHMARK_NOTES.md
+CLAUDE.md
+AGENTS.md
+docs/
+eval/
+scripts/
+adversarial/
+bold_safety/
+supporting_docs/
 
 # --- Local tooling state ---------------------------------------------------------
 .claude/

@@ -168,8 +168,8 @@ def _get_client() -> OpenAI:
     if _client is None:
         # timeout makes a hung request fail fast instead of blocking the UI. max_retries=0 so
         # REQUEST_TIMEOUT_SECONDS is a real ceiling: the SDK default (2 retries) would re-issue a
-        # timed-out request, turning the 30s bound into ~90s+ (scripts/benchmarks/full_multimodel.py does
-        # the same). Our own _create_with_fallbacks already handles the param-rejection retries.
+        # timed-out request, turning the 30s bound into ~90s+. Our own _create_with_fallbacks
+        # already handles the param-rejection retries.
         _client = OpenAI(timeout=REQUEST_TIMEOUT_SECONDS, max_retries=0)  # reads OPENAI_API_KEY from env
     return _client
 
@@ -207,7 +207,7 @@ def _build_content(images, media_type="image/png", prompt=_PROMPT):
 # return EXACTLY this shape (every key present, correct types). IMPORTANT: this guarantees the
 # SHAPE of the response, NOT the correctness of any judgment inside it -- e.g. header_bold is
 # still only the model's visual opinion, which benchmarks show is unreliable on real labels
-# (see BENCHMARK_NOTES.md). _coerce() still runs afterward for value normalization, and
+# (see BENCHMARK_NOTES.md, dev-archive branch). _coerce() still runs afterward for value normalization, and
 # _parse_response() still guards against truncated/empty/invalid responses.
 _CONF_ENUM = {"type": "string", "enum": ["high", "medium", "low"]}
 _SCALAR_FIELD_SCHEMA = {

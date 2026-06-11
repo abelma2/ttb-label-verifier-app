@@ -12,11 +12,16 @@ rows to products, and results land in a worst-first table with per-product detai
 function, deployed as one Vercel project. The original Streamlit prototype (`app.py`)
 still works locally and is kept for reference.
 
+> `main` carries only what you need to download and run the app (plus a ready-made
+> example label in `examples/`). The full development history — benchmarks, the scored
+> eval harness, ground-truth fixtures, and research notes — is preserved on the
+> [`dev-archive`](../../tree/dev-archive) branch.
+
 ## Architecture
 
 ```
 Browser (Next.js, TypeScript + Tailwind)
-   │  POST /api/py/verify  (multipart: 1–2 images + optional application JSON)
+   │  POST /api/py/verify  (multipart: 1–4 images + optional application JSON)
    ▼
 FastAPI function (api/index.py — validation, orchestration, error mapping ONLY)
    │
@@ -28,8 +33,8 @@ FastAPI function (api/index.py — validation, orchestration, error mapping ONLY
 
 Two stages — **the model reads, deterministic Python judges** — and the web layer adds
 no third stage: `api/index.py` contains zero business logic. The engine modules at the
-repo root are untouched and shared by the web API, the Streamlit prototype, the unit
-tests, and the eval/benchmark harnesses.
+repo root are untouched and shared by the web API, the Streamlit prototype, and the
+unit tests.
 
 Routing: the frontend always calls relative `/api/py/*`. In dev, `next.config.ts`
 proxies that to uvicorn on `:8000`; in production a rewrite sends it to the
@@ -47,8 +52,8 @@ extraction.py         vision extraction -> fixed JSON schema
 verification.py       deterministic verification -> pass/needs_review/fail per field
 tests/                test_verification.py (engine) + test_api.py (the new API glue)
 app.py                legacy Streamlit prototype (local-only, excluded from deploys)
-scripts/, eval/       smoke test, fixture generator, benchmarks, scored eval harness
-vercel.json           Python function config (maxDuration, includeFiles)
+examples/             a ready-to-use demo label (front + back images + application file)
+vercel.json           Python function config (maxDuration)
 .vercelignore         keeps all dev/test/tooling content out of deployments
 ```
 
@@ -85,7 +90,7 @@ vercel.json           Python function config (maxDuration, includeFiles)
 - **Batch mode is client-side orchestration, not a batch endpoint.** The Streamlit app
   fanned a batch out over a server-side thread pool; on serverless that shape fights both
   the 4.5 MB body limit and the per-invocation duration cap. Instead the browser groups
-  files into products (same filename-stem convention as `app.py`/`smoke_test.py`), then
+  files into products (same filename-stem convention as `app.py`), then
   issues one `/api/py/verify` request per product with a small concurrency pool — each
   product is its own serverless invocation, so the platform does the scaling and one bad
   product becomes an error row, never a sunk batch. The grouping and application-file
@@ -114,13 +119,16 @@ files are gitignored, and `.streamlit/` is additionally excluded from deploys.
 
 ## Local development
 
+Prerequisites: **Python ≥ 3.10** (the engine uses modern type syntax) and
+**Node ≥ 22.6** (`npm run test:web` uses Node's built-in TypeScript stripping).
+
 ```bash
 pip install -r requirements-dev.txt
 npm install
 
 # terminal 1 — API on :8000
+export OPENAI_API_KEY="sk-..."              # PowerShell: $env:OPENAI_API_KEY = "sk-..."
 npm run dev:api        # = uvicorn api.index:app --reload --port 8000
-# (set OPENAI_API_KEY in this terminal's environment)
 
 # terminal 2 — frontend on :3000 (proxies /api/py/* to :8000)
 npm run dev
@@ -136,15 +144,24 @@ npm run test:api             # just the API layer
 npm run test:web             # batch grouping / application-file parsing (node:test)
 ```
 
-**Legacy Streamlit prototype:**
+**Legacy Streamlit prototype** (the quickest single-command local run):
 
 ```bash
 pip install -r requirements-streamlit.txt
 streamlit run app.py
 ```
 
-End-to-end harnesses that call the real model (cost money): `python scripts/smoke_test.py
---group test_labels/real_labels test_labels/baseline_labels` and `python eval/run_eval.py`.
+## Try it in one minute
+
+`examples/` has a synthetic, compliant malt-beverage label (fictional brand):
+upload `malt_and_hop_Front.jpg` + `malt_and_hop_Other.jpg` in the app and click
+verify — that's the rules-only screening. Load `malt_and_hop_application.json`
+into the form first to see label-vs-application matching, and change a value
+(say, the ABV) to watch a mismatch get caught. Details in
+[examples/README.md](examples/README.md).
+
+The development-time harnesses (model benchmarks, the scored eval) live on the
+[`dev-archive`](../../tree/dev-archive) branch.
 
 ## Deploying to Vercel
 
@@ -186,7 +203,8 @@ TTB's "Checklist of Mandatory Label Information" per class:
   caps are judged deterministically from the transcription; bold is confidence-gated
   (`medium_pass_gate`): pass when both bold rules are confirmed at medium-or-high
   confidence, fail only on a high-confidence violation, needs-review otherwise. Font-weight
-  detection from photos is unreliable (see `BENCHMARK_NOTES.md`), so a null/low-confidence
+  detection from photos is unreliable (see `BENCHMARK_NOTES.md` on the `dev-archive`
+  branch), so a null/low-confidence
   bold read never auto-passes, and a confident violation always fails. (The stricter
   high-confidence-only PASS gate remains available: `WARNING_BOLD_POLICY=header_body_gate`.)
 - **Alcohol content** — class-dependent presence; bare "ABV" notation fails (not a TTB

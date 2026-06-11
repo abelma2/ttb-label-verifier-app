@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "description": "Next.js frontend + FastAPI serverless backend for the TTB label verification engine",
+  "engines": {
+    "node": ">=22.6"
+  },
   "scripts": {
     "dev": "next dev",
     "dev:api": "uvicorn api.index:app --reload --port 8000",

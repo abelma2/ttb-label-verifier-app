@@ -58,7 +58,8 @@ WARNING_WORDING_REVIEW_FLOOR = 90
 #   "review"      -- an otherwise-valid warning always goes to needs-review for a human.
 #   "trust_model" -- judge from header_bold alone (True->pass, False->FAIL, None->review),
 #                    ignoring confidence. Not recommended.
-# See BENCHMARK_NOTES.md for the bold experiments behind these choices.
+# See BENCHMARK_NOTES.md (dev-archive branch; kept locally for dev) for the bold
+# experiments behind these choices.
 WARNING_BOLD_POLICY = os.environ.get("WARNING_BOLD_POLICY", "medium_pass_gate")
 
 # --- Fuzzy-match thresholds (0-100) for text fields (brand, class/type) -------
@@ -120,7 +121,7 @@ ESCALATE_LOW_CONFIDENCE = True
 
 # --- Extraction / runtime ----------------------------------------------------
 # Vision model used for extraction. gpt-5.4-mini is the default, chosen by a 5x stability pass
-# (scripts/benchmarks/stability_benchmark.py; BENCHMARK_NOTES.md). Under WARNING_BOLD_POLICY
+# (scripts/benchmarks/stability_benchmark.py; BENCHMARK_NOTES.md -- dev-archive branch). Under WARNING_BOLD_POLICY
 # "confidence_gate" it caught the NOT-BOLD adversarial (03_notbold) 5/5, passed compliant (01)
 # 5/5, failed title-case/reworded 5/5, AND passed the realistic baselines 14/15 -- whereas
 # gpt-4.1 (the prior default) caught 03_notbold but FALSE-FAILED every realistic baseline

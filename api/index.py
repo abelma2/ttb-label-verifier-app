@@ -6,7 +6,7 @@ verify_label_only), and maps failures to meaningful HTTP responses. The engine
 modules at the repo root are the source of truth and are imported untouched.
 
 Import strategy (deliberate): the engine stays at the repo root (it is shared
-with the Streamlit app, the test suite, and the eval/benchmark harnesses), and
+with the Streamlit app and the test suite), and
 this file puts the root on sys.path before importing it. On Vercel the Python
 builder bundles ALL project files not excluded by .vercelignore into the
 function by default (it honors `excludeFiles` only — there is no include knob),

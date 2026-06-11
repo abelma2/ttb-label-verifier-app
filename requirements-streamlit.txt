@@ -1,6 +1,6 @@
-# Extras for the legacy Streamlit prototype (app.py) and the image-generating
-# dev scripts. Not deployed; the production web app is Next.js + api/.
+# Extras for the legacy Streamlit prototype (app.py). Not deployed; the
+# production web app is Next.js + api/.
 -r requirements.txt
 streamlit>=1.49,<2.0  # >=1.49: width="stretch" API (use_container_width is deprecated for removal within 1.x)
-pillow>=10.0,<12.0    # _thumb() display-thumbnail downscale in app.py (also a streamlit dependency
-                      # and used by scripts/generate_adversarial.py); imported lazily, soft-disables if absent
+pillow>=10.0,<12.0    # _thumb() display-thumbnail downscale in app.py (also a streamlit
+                      # dependency); imported lazily, soft-disables if absent
