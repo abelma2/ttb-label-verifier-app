@@ -1,8 +1,8 @@
 /**
- * Unit tests for the TypeScript ports of app.py's batch helpers (_stem,
- * _group_uploads, _parse_applications, _app_row_for, _pick_application_row).
- * The two implementations are one contract in two languages — these tests
- * mirror the documented app.py behavior case for case.
+ * Unit tests for the batch helpers (stem, groupUploads, parseApplications,
+ * appRowFor, pickApplicationRow) — originally TypeScript ports of the retired
+ * Streamlit prototype's helpers (dev-archive branch); these tests pin the
+ * documented behavior case for case.
  *
  * Run: npm run test:web   (node --experimental-strip-types --test; no deps)
  */

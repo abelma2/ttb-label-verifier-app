@@ -9,12 +9,12 @@ mode** screens many labels at once: files pair into products by filename stem
 rows to products, and results land in a worst-first table with per-product detail.
 
 **Production web app:** Next.js (App Router) frontend + a thin FastAPI serverless
-function, deployed as one Vercel project. The original Streamlit prototype (`app.py`)
-still works locally and is kept for reference.
+function, deployed as one Vercel project.
 
 > `main` carries only what you need to download and run the app (plus a ready-made
 > example label in `examples/`). The full development history — benchmarks, the scored
-> eval harness, ground-truth fixtures, and research notes — is preserved on the
+> eval harness, ground-truth fixtures, research notes, and the retired Streamlit
+> prototype this app grew out of — is preserved on the
 > [`dev-archive`](../../tree/dev-archive) branch.
 
 ## Architecture
@@ -33,8 +33,7 @@ FastAPI function (api/index.py — validation, orchestration, error mapping ONLY
 
 Two stages — **the model reads, deterministic Python judges** — and the web layer adds
 no third stage: `api/index.py` contains zero business logic. The engine modules at the
-repo root are untouched and shared by the web API, the Streamlit prototype, and the
-unit tests.
+repo root are untouched and shared by the web API and the unit tests.
 
 Routing: the frontend always calls relative `/api/py/*`. In dev, `next.config.ts`
 proxies that to uvicorn on `:8000`; in production a rewrite sends it to the
@@ -51,7 +50,6 @@ config.py             regulatory constants & tunable thresholds (env-overridable
 extraction.py         vision extraction -> fixed JSON schema
 verification.py       deterministic verification -> pass/needs_review/fail per field
 tests/                test_verification.py (engine) + test_api.py (the new API glue)
-app.py                legacy Streamlit prototype (local-only, excluded from deploys)
 examples/             a ready-to-use demo label (front + back images + application file)
 vercel.json           Python function config (maxDuration)
 .vercelignore         keeps all dev/test/tooling content out of deployments
@@ -85,25 +83,23 @@ vercel.json           Python function config (maxDuration)
   Windows binaries and the dev machine runs 32-bit Node; v3 is pure JS with identical
   output for this UI. Swap to v4 if your toolchain is 64-bit.
 - **`requirements.txt` is the deploy manifest** (fastapi, pydantic, python-multipart,
-  openai, rapidfuzz — no Streamlit). Dev/test tooling lives in `requirements-dev.txt`;
-  the Streamlit prototype's extras in `requirements-streamlit.txt`.
-- **Batch mode is client-side orchestration, not a batch endpoint.** The Streamlit app
-  fanned a batch out over a server-side thread pool; on serverless that shape fights both
-  the 4.5 MB body limit and the per-invocation duration cap. Instead the browser groups
-  files into products (same filename-stem convention as `app.py`), then
-  issues one `/api/py/verify` request per product with a small concurrency pool — each
-  product is its own serverless invocation, so the platform does the scaling and one bad
-  product becomes an error row, never a sunk batch. The grouping and application-file
-  parsing logic is a 1:1 TypeScript port of `app.py`'s (`src/lib/stem.ts`,
-  `src/lib/applications.ts`), pinned by unit tests run with Node's built-in test runner
+  openai, rapidfuzz). Dev/test tooling lives in `requirements-dev.txt`.
+- **Batch mode is client-side orchestration, not a batch endpoint.** A server-side
+  thread-pool fan-out (how the retired Streamlit prototype did it) fights both the
+  4.5 MB body limit and the per-invocation duration cap on serverless. Instead the
+  browser groups files into products (the `_Front`/`_Other` filename-stem convention),
+  then issues one `/api/py/verify` request per product with a small concurrency pool —
+  each product is its own serverless invocation, so the platform does the scaling and
+  one bad product becomes an error row, never a sunk batch. The grouping and
+  application-file parsing logic lives in `src/lib/stem.ts` and
+  `src/lib/applications.ts`, pinned by unit tests run with Node's built-in test runner
   (`npm run test:web` — no extra test toolchain for ~20 pure-function assertions).
-- **One deliberate non-port:** `app.py`'s "copy extracted values into the form"
+- **One deliberate omission:** there is no "copy extracted values into the form"
   convenience. The application must stay an independent witness; the web UI only accepts
   applicant-supplied values (typed, or prefilled from an application file).
 - **Products are capped at 4 images** (front, back/other, neck/strip) — a consequence of
-  the 4.5 MB request budget that `app.py`'s single-server upload didn't have. The batch
-  preview flags any over-limit stem group *before* the run instead of letting it fail
-  mid-batch.
+  the 4.5 MB serverless request budget. The batch preview flags any over-limit stem
+  group *before* the run instead of letting it fail mid-batch.
 
 ## Environment variables
 
@@ -113,9 +109,8 @@ vercel.json           Python function config (maxDuration)
 | `EXTRACTION_MODEL` | no | override the vision model (default `gpt-5.4-mini`, chosen by a 5× stability benchmark) |
 | `WARNING_BOLD_POLICY` | no | bold-gate policy for the government warning (default `medium_pass_gate`; set `header_body_gate` for the stricter high-confidence-only PASS gate; see `config.py`) |
 
-Locally you can also put the key in `.streamlit/secrets.toml` (the Streamlit prototype
-reads it there); the FastAPI layer uses only `os.environ`. Never commit secrets — both
-files are gitignored, and `.streamlit/` is additionally excluded from deploys.
+The FastAPI layer reads the key from the environment only (`os.environ`). Never commit
+secrets; on Vercel, set the key in the project's environment variables.
 
 ## Local development
 
@@ -144,13 +139,6 @@ npm run test:api             # just the API layer
 npm run test:web             # batch grouping / application-file parsing (node:test)
 ```
 
-**Legacy Streamlit prototype** (the quickest single-command local run):
-
-```bash
-pip install -r requirements-streamlit.txt
-streamlit run app.py
-```
-
 ## Try it in one minute
 
 `examples/` has a synthetic, compliant malt-beverage label (fictional brand):
@@ -170,7 +158,7 @@ The development-time harnesses (model benchmarks, the scored eval) live on the
 2. Set the `OPENAI_API_KEY` environment variable in the Vercel project settings.
 3. Deploy. `vercel.json` configures the Python function (`maxDuration: 60` — a 2-image
    read takes ~7–10 s and the engine's own request ceiling is 30 s), and `.vercelignore`
-   keeps tests, fixtures, benchmarks, docs, and the Streamlit prototype out of the
+   keeps tests, the `examples/` demo assets, and any local dev content out of the
    deployment entirely (the Python builder bundles everything it doesn't exclude).
 
 Notes: request bodies are capped at 4.5 MB by the platform (handled client-side, see

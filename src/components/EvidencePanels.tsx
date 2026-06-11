@@ -1,6 +1,6 @@
 import type { AdditionalStatement, Extraction } from "@/lib/types";
 
-/** "yes" / "no" / "not determinable" — port of app.py's _yn. */
+/** "yes" / "no" / "not determinable". */
 function yn(value: boolean | null | undefined): string {
   if (value === true) return "yes";
   if (value === false) return "no";
@@ -27,8 +27,7 @@ function Expander({ summary, children }: { summary: string; children: React.Reac
   );
 }
 
-/** The model's government-warning OBSERVATIONS (evidence, not judgment) —
- *  port of app.py's _warning_evidence. */
+/** The model's government-warning OBSERVATIONS (evidence, not judgment). */
 export function WarningEvidence({ extracted }: { extracted: Extraction }) {
   const gw = extracted.government_warning;
   return (
@@ -55,7 +54,7 @@ export function WarningEvidence({ extracted }: { extracted: Extraction }) {
 }
 
 /** Evidence-only extraction fields + additional statements: shown for the
- *  reviewer, never auto-checked — port of app.py's _evidence_panel. */
+ *  reviewer, never auto-checked. */
 const EVIDENCE_FIELDS = [
   "fanciful_name",
   "statement_of_composition",
@@ -104,7 +103,7 @@ export function OtherLabelDetails({
   );
 }
 
-/** Full technical readout — port of app.py's JSON expander. */
+/** Full technical readout of the raw extraction. */
 export function JsonReadout({ extracted }: { extracted: Extraction }) {
   return (
     <Expander summary="Full technical readout (JSON)">

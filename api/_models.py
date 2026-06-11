@@ -2,7 +2,7 @@
 
 These mirror two existing contracts and add nothing to them:
   - ApplicationData mirrors the application fields verification.verify() reads
-    (the same keys the Streamlit form and the batch application files use).
+    (the same keys the application form and batch application files use).
   - VerifyResponse mirrors verify()/verify_label_only()'s return shape, with
     FieldResult dataclasses serialized verbatim.
 
@@ -95,8 +95,7 @@ class GovernmentWarningField(BaseModel):
 class Extraction(BaseModel):
     """The engine's coerced extraction schema (see extraction._EXTRACTION_SCHEMA).
     Returned alongside the verdicts so the UI can show the model's raw read —
-    evidence-only fields, warning observations, and the full JSON readout —
-    exactly as the Streamlit prototype does."""
+    evidence-only fields, warning observations, and the full JSON readout."""
     beverage_type: str
     brand_name: ExtractedField
     fanciful_name: ExtractedField

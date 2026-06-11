@@ -6,7 +6,7 @@ verify_label_only), and maps failures to meaningful HTTP responses. The engine
 modules at the repo root are the source of truth and are imported untouched.
 
 Import strategy (deliberate): the engine stays at the repo root (it is shared
-with the Streamlit app and the test suite), and
+with the test suite), and
 this file puts the root on sys.path before importing it. On Vercel the Python
 builder bundles ALL project files not excluded by .vercelignore into the
 function by default (it honors `excludeFiles` only — there is no include knob),
@@ -257,8 +257,9 @@ async def verify_label(
         # run_in_threadpool: the engine's OpenAI call is synchronous (and its 429
         # backoff sleeps), so running it inline would block the event loop for the
         # whole read — freezing concurrent requests locally and under Vercel's
-        # in-function concurrency. The engine is already used concurrently from
-        # threads by the Streamlit batch mode, so this is safe.
+        # in-function concurrency. The engine has no shared mutable state (its
+        # one global is the lazily-created thread-safe OpenAI client), so
+        # concurrent threaded use is safe.
         extracted = await run_in_threadpool(extract_fields, pairs)
     except Exception as exc:  # noqa: BLE001 — failure_kind classifies, we map to HTTP
         kind = failure_kind(exc)

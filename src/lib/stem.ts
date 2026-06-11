@@ -1,8 +1,8 @@
 /**
- * Product-stem grouping — a 1:1 port of app.py's `_stem` / `_group_uploads`
- * (the `_Front`/`_Other` filename convention). Keep the behavior in lockstep
- * with app.py: these two implementations are the same contract in two
- * languages.
+ * Product-stem grouping (the `_Front`/`_Other` filename convention) —
+ * originally a 1:1 port of the retired Streamlit prototype's `_stem` /
+ * `_group_uploads` (dev-archive branch); this is now the canonical
+ * implementation.
  */
 
 /** Product stem of a filename: extension dropped and a TRAILING side marker

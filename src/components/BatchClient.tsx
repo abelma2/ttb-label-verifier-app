@@ -22,7 +22,7 @@ const STATUS_LABEL: Record<Status, string> = {
   fail: "Fail",
 };
 
-/** Worst-first ordering for the results table (port of app.py). */
+/** Worst-first ordering for the results table. */
 const RANK_ORDER: Record<string, number> = { fail: 0, error: 1, needs_review: 2, pass: 3 };
 
 const PAGE_SIZE = 10;

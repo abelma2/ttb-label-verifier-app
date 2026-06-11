@@ -8,8 +8,7 @@ interface TabsProps {
 
 /**
  * WAI-ARIA tabs. Inactive panels are hidden, NOT unmounted — switching modes
- * must never wipe the other mode's uploads, form values, or results (the same
- * reason app.py uses st.tabs over a mode radio).
+ * must never wipe the other mode's uploads, form values, or results.
  */
 export default function Tabs({ tabs }: TabsProps) {
   const [active, setActive] = useState(0);

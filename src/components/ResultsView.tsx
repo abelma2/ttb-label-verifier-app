@@ -80,8 +80,7 @@ export interface ProductReportProps {
 }
 
 /** One product's full verification report: verdict banner, field cards, photo
- *  note, warning-absence hint, and the evidence expanders — the web port of
- *  app.py's _render_product. */
+ *  note, warning-absence hint, and the evidence expanders. */
 export function ProductReport({
   result,
   headingId,

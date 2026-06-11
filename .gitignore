@@ -1,5 +1,5 @@
 # --- Secrets: never commit -------------------------------------------------
-.streamlit/secrets.toml
+.streamlit/
 .env
 .env.*
 !.env.example
@@ -32,6 +32,8 @@ test_labels/
 BENCHMARK_NOTES.md
 CLAUDE.md
 AGENTS.md
+app.py
+requirements-streamlit.txt
 docs/
 eval/
 scripts/

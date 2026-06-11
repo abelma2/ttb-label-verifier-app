@@ -1,12 +1,13 @@
 ﻿/**
- * Application-data file parsing — a 1:1 port of app.py's `_parse_applications`
- * / `_app_row_for` / `_pick_application_row`. The file pairs each product (by
- * its filename stem) with the applicant-submitted values; parsing failures
+ * Application-data file parsing — originally a 1:1 port of the retired
+ * Streamlit prototype's `_parse_applications` / `_app_row_for` /
+ * `_pick_application_row` (dev-archive branch). The file pairs each product
+ * (by its filename stem) with the applicant-submitted values; parsing failures
  * never block a batch — products just screen rules-only.
  */
 
-/** The application columns the verifier compares against (matches app.py's
- *  `_APP_FIELDS`; the batch file does not carry the two union-only fields). */
+/** The application columns the verifier compares against (the batch file does
+ *  not carry the two union-only fields). */
 export const APP_FIELDS = [
   "brand_name",
   "class_type",
@@ -30,7 +31,7 @@ export function normHeader(key: string): string {
   return String(key).trim().toLowerCase().replace(/[\s\-]+/g, "_");
 }
 
-/** Python-truthiness string coercion, mirroring app.py's `str(x or "")`:
+/** Python-truthiness string coercion, mirroring the prototype's `str(x or "")`:
  *  0, false, null, "", and empty arrays/objects all collapse to "" (a JSON
  *  application value of 0/false must not become the string "0"/"false" here
  *  when the Python app would treat it as blank). */
@@ -126,7 +127,7 @@ function jsonRows(text: string): Record<string, unknown>[] | string {
   }
   if (data && typeof data === "object" && !Array.isArray(data)) {
     // the mapping key IS the product and must beat any inner product-ish field:
-    // normalize the inner keys FIRST, then assert the key last (mirrors app.py)
+    // normalize the inner keys FIRST, then assert the key last (mirrors the prototype)
     return Object.entries(data as Record<string, unknown>)
       .filter(([, v]) => v && typeof v === "object" && !Array.isArray(v))
       .map(([k, v]) => ({
@@ -151,7 +152,7 @@ export function parseApplications(rawText: string, filename: string): ParsedAppl
   try {
     const text = rawText.replace(/^\uFEFF/, ""); // tolerate a UTF-8 BOM
     // File.text() never throws on binary input \u2014 invalid bytes become U+FFFD \u2014
-    // so detect the .xlsx-renamed-to-.csv mistake here (app.py's
+    // so detect the .xlsx-renamed-to-.csv mistake here (the prototype's
     // UnicodeDecodeError branch) instead of failing with a misleading
     // "no rows" error.
     if (text.includes("\uFFFD") || text.includes("\u0000")) {

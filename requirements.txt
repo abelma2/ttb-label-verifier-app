@@ -1,7 +1,7 @@
 # Serverless API + engine dependencies. This is what Vercel installs for the
-# Python function, so it must stay lean: NO streamlit (the legacy Streamlit UI's
-# extras live in requirements-streamlit.txt; dev/test tools in requirements-dev.txt).
-# Pinned with major-version caps so a cloud rebuild can't pull a breaking major.
+# Python function, so it must stay lean (dev/test tools live in
+# requirements-dev.txt). Pinned with major-version caps so a cloud rebuild
+# can't pull a breaking major.
 fastapi>=0.115,<1.0
 pydantic>=2,<3                 # imported directly by api/_models.py (v2-only API)
 python-multipart>=0.0.18,<0.1  # multipart parsing for FastAPI UploadFile

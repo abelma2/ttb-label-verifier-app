@@ -1,6 +1,6 @@
 /**
- * Batch screening runner — the web counterpart of app.py's batch flow. Where
- * the Streamlit app fanned out over a server-side ThreadPoolExecutor, here
+ * Batch screening runner. Where the retired Streamlit prototype (dev-archive
+ * branch) fanned a batch out over a server-side ThreadPoolExecutor, here
  * each product is one API request (= one serverless invocation) issued from
  * the browser with a small concurrency cap. Results are keyed by index, not
  * label — distinct products can share a stem — and one failed product becomes
@@ -14,15 +14,15 @@ import type { AppRow } from "./applications.ts";
 import type { Product } from "./stem.ts";
 import type { VerifyResponse } from "./types.ts";
 
-/** Concurrent in-flight requests — 8, matching the Streamlit app's
- *  BATCH_MAX_WORKERS (a 10-product batch is 2 waves, not 3). The account's
+/** Concurrent in-flight requests — 8, matching the engine's
+ *  config.BATCH_MAX_WORKERS (a 10-product batch is 2 waves, not 3). The account's
  *  rate limits leave ~50x headroom at this rate, and the engine's 429 backoff
  *  remains as a safety net for smaller accounts. In local dev the browser's
  *  ~6-connection HTTP/1.1 cap queues the extras harmlessly; on Vercel (HTTP/2)
  *  all 8 run in parallel as separate function invocations. */
 export const BATCH_CONCURRENCY = 8;
 
-/** Short error labels for the results table (port of app.py's _ERROR_SHORT,
+/** Short error labels for the results table (ported from the prototype,
  *  extended with the client-side kinds). Full messages show in the detail view. */
 export const ERROR_SHORT: Record<string, string> = {
   auth: "service not set up",
