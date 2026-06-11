@@ -1,0 +1,36 @@
+# --- Secrets: never commit -------------------------------------------------
+.streamlit/secrets.toml
+.env
+.env.*
+!.env.example
+
+# --- Python ------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.audit-venv/
+.venv/
+venv/
+
+# --- Node / Next.js ----------------------------------------------------------
+node_modules/
+.next/
+out/
+.vercel/
+*.tsbuildinfo
+next-env.d.ts
+
+# --- Run artifacts & scratch ---------------------------------------------------
+output/
+archive/
+artifacts/
+
+# --- Label images are local-only test data (large / not redistributable). -----
+# Keep the typed application fixtures the eval and app compare against.
+test_labels/*
+!test_labels/applications/
+!test_labels/applications/*.json
+
+# --- OS noise ------------------------------------------------------------------
+.DS_Store
+Thumbs.db

@@ -1,0 +1,53 @@
+{
+  "_meta": {
+    "product": "Captain John's Spiced Rum",
+    "beverage": "spirits",
+    "checklist": "supporting_docs/CHECKLIST_OF_MANDATORY_LABEL_INFO/ds-labeling-checklist.pdf (27 CFR part 5 + part 16)",
+    "clean_baseline_front": "test_labels/baseline_labels/baseline_1_Front.png",
+    "clean_baseline_back": "test_labels/baseline_labels/baseline_1_Other.png",
+    "source": "All values transcribed from baseline_1 (front + back).",
+    "note": "Top-level keys are the COMPLETE set of mandatory label items for distilled spirits. verify() consumes brand_name, class_type, alcohol_content, net_contents, name_and_address, country_of_origin; the other items are part of the application for completeness (see _checklist for citation + which the verifier currently checks)."
+  },
+
+  "brand_name": "Captain John's",
+  "class_type": "Spiced Rum",
+  "statement_of_composition": "Rum with natural flavors added",
+  "alcohol_content": "20% Alcohol by Volume (40 Proof)",
+  "proof": 40,
+  "net_contents": "750 mL",
+  "name_and_address": "DISTILLED & BOTTLED BY: ABC Distillery, Frederick, MD",
+  "health_warning": "GOVERNMENT WARNING: (1) According to the Surgeon General, women should not drink alcoholic beverages during pregnancy because of the risk of birth defects. (2) Consumption of alcoholic beverages impairs your ability to drive a car or operate machinery, and may cause health problems.",
+  "country_of_origin": null,
+
+  "_checklist": {
+    "brand_name":            {"citation": "27 CFR 5.64",          "applies": "yes", "verifier_checks": "yes (fuzzy token_set_ratio vs the application brand/fanciful union)"},
+    "class_type":            {"citation": "27 CFR 5.165 / 5.141", "applies": "yes (a flavored spirit may be designated by a distinctive name + statement of composition)", "verifier_checks": "partial (fuzzy match; spelling and recognized-class-per-5.165 not checked)"},
+    "statement_of_composition": {"citation": "27 CFR 5.141",      "applies": "conditional - REQUIRED for Distilled Spirits Specialty products that use the distinctive/fanciful-name + statement-of-composition designation path (incl. flavored); applies here ('Rum with natural flavors added')", "verifier_checks": "no (now a DEDICATED evidence-only extraction field 'statement_of_composition'; NOT consumed by verify() -> reviewer-only / not verifier-judged)"},
+    "alcohol_content":       {"citation": "27 CFR 5.65",          "applies": "yes", "verifier_checks": "yes (numeric match + NOTATION format now checked: bare 'ABV' is rejected, 27 CFR 5.65)"},
+    "proof":                 {"citation": "27 CFR 5.65",          "applies": "yes (proof shown)", "verifier_checks": "yes (now validated: proof must equal 2x ABV; 50 proof on 20% ABV -> FAIL; config.PROOF_ABV_TOLERANCE)"},
+    "net_contents":          {"citation": "27 CFR 5.70 / 5.203",  "applies": "yes", "verifier_checks": "partial (unit-aware VOLUME compare: same volume in a different unit/format -> needs_review; standard-of-fill table 5.203 still NOT enforced)"},
+    "name_and_address":      {"citation": "27 CFR 5.66 / 5.67 / 5.68", "applies": "yes", "verifier_checks": "partial (punctuation/relationship-prefix-normalized fuzzy + short-subset coverage guard; producer-name SUBSTITUTION is a KNOWN GAP/xfail; 'Bottled By' prefix and no-intervening-text not checked)"},
+    "health_warning":        {"citation": "27 CFR part 16",       "applies": "yes", "verifier_checks": "yes (exact wording + ALL-CAPS + S/G capitalization are deterministic; BOLD is confidence-gated (header_body_gate) and run-to-run UNSTABLE; checked from the LABEL, not this form value)"},
+    "country_of_origin":     {"citation": "27 CFR 5.69 / 19 CFR 134.11", "applies": "no (domestic)", "verifier_checks": "yes (when imported)"}
+  },
+
+  "_layout_typography_structural": {
+    "same_field_of_vision": "27 CFR 5.63 - brand name + alcohol content + class/type must appear in one field of vision; NOT verifiable from flat per-field text -> structural / out-of-scope",
+    "designation_separate_and_apart": "27 CFR 5.165 / 5.141 - class/type must be separate and apart from other info -> structural / out-of-scope",
+    "health_warning_separate_and_apart_single": "27 CFR part 16 - one statement, separate and apart -> structural / out-of-scope",
+    "health_warning_bold_typography": "27 CFR part 16 - 'GOVERNMENT WARNING' in CAPS + BOLD; caps + S/G are judged deterministically, BOLD is confidence-gated and machine-unreliable -> reviewer-leaning"
+  },
+
+  "_not_applicable": {
+    "country_of_origin": "domestic product; imports only",
+    "sulfite_declaration": "absent (no >=10ppm SO2)",
+    "coloring_materials": "absent",
+    "fdc_yellow_5": "absent",
+    "cochineal_or_carmine": "absent",
+    "treatment_with_wood": "n/a (rum)",
+    "commodity_neutral_spirits_statement": "n/a (no neutral spirits)",
+    "state_of_distillation": "n/a (not whisky)",
+    "statement_of_age": "n/a (not whisky aged <4yr)",
+    "formula_number": "UNMODELED - flavored spirit likely requires an approved formula (27 CFR 5.141); application-side data not modeled by the verifier"
+  }
+}

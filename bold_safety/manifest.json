@@ -1,0 +1,142 @@
+{
+  "bold_compliant__clean.png": {
+    "variant": "bold_compliant",
+    "distortion": "clean",
+    "bold_gt": true,
+    "header_bold_font": true,
+    "body_bold_font": false
+  },
+  "bold_compliant__lowres.png": {
+    "variant": "bold_compliant",
+    "distortion": "lowres",
+    "bold_gt": true,
+    "header_bold_font": true,
+    "body_bold_font": false
+  },
+  "bold_compliant__jpeg.jpg": {
+    "variant": "bold_compliant",
+    "distortion": "jpeg",
+    "bold_gt": true,
+    "header_bold_font": true,
+    "body_bold_font": false
+  },
+  "bold_compliant__rotblur.png": {
+    "variant": "bold_compliant",
+    "distortion": "rotblur",
+    "bold_gt": true,
+    "header_bold_font": true,
+    "body_bold_font": false
+  },
+  "bold_compliant__curved.png": {
+    "variant": "bold_compliant",
+    "distortion": "curved",
+    "bold_gt": true,
+    "header_bold_font": true,
+    "body_bold_font": false
+  },
+  "notbold__clean.png": {
+    "variant": "notbold",
+    "distortion": "clean",
+    "bold_gt": false,
+    "header_bold_font": false,
+    "body_bold_font": false
+  },
+  "notbold__lowres.png": {
+    "variant": "notbold",
+    "distortion": "lowres",
+    "bold_gt": false,
+    "header_bold_font": false,
+    "body_bold_font": false
+  },
+  "notbold__jpeg.jpg": {
+    "variant": "notbold",
+    "distortion": "jpeg",
+    "bold_gt": false,
+    "header_bold_font": false,
+    "body_bold_font": false
+  },
+  "notbold__rotblur.png": {
+    "variant": "notbold",
+    "distortion": "rotblur",
+    "bold_gt": false,
+    "header_bold_font": false,
+    "body_bold_font": false
+  },
+  "notbold__curved.png": {
+    "variant": "notbold",
+    "distortion": "curved",
+    "bold_gt": false,
+    "header_bold_font": false,
+    "body_bold_font": false
+  },
+  "titlecase__clean.png": {
+    "variant": "titlecase",
+    "distortion": "clean",
+    "bold_gt": true,
+    "header_bold_font": true,
+    "body_bold_font": false
+  },
+  "titlecase__lowres.png": {
+    "variant": "titlecase",
+    "distortion": "lowres",
+    "bold_gt": true,
+    "header_bold_font": true,
+    "body_bold_font": false
+  },
+  "titlecase__jpeg.jpg": {
+    "variant": "titlecase",
+    "distortion": "jpeg",
+    "bold_gt": true,
+    "header_bold_font": true,
+    "body_bold_font": false
+  },
+  "titlecase__rotblur.png": {
+    "variant": "titlecase",
+    "distortion": "rotblur",
+    "bold_gt": true,
+    "header_bold_font": true,
+    "body_bold_font": false
+  },
+  "titlecase__curved.png": {
+    "variant": "titlecase",
+    "distortion": "curved",
+    "bold_gt": true,
+    "header_bold_font": true,
+    "body_bold_font": false
+  },
+  "boldbody__clean.png": {
+    "variant": "boldbody",
+    "distortion": "clean",
+    "bold_gt": false,
+    "header_bold_font": true,
+    "body_bold_font": true
+  },
+  "boldbody__lowres.png": {
+    "variant": "boldbody",
+    "distortion": "lowres",
+    "bold_gt": false,
+    "header_bold_font": true,
+    "body_bold_font": true
+  },
+  "boldbody__jpeg.jpg": {
+    "variant": "boldbody",
+    "distortion": "jpeg",
+    "bold_gt": false,
+    "header_bold_font": true,
+    "body_bold_font": true
+  },
+  "boldbody__rotblur.png": {
+    "variant": "boldbody",
+    "distortion": "rotblur",
+    "bold_gt": false,
+    "header_bold_font": true,
+    "body_bold_font": true
+  },
+  "boldbody__curved.png": {
+    "variant": "boldbody",
+    "distortion": "curved",
+    "bold_gt": false,
+    "header_bold_font": true,
+    "body_bold_font": true
+  }
+}

@@ -1,0 +1,7 @@
+# Pinned with major-version caps so a cloud rebuild can't pull a breaking major
+# (the openai>=1.0 client API and the streamlit calls below assume these majors).
+streamlit>=1.49,<2.0  # >=1.49: width="stretch" API (use_container_width is deprecated for removal within 1.x)
+openai>=1.50,<2.0
+rapidfuzz>=3.9,<4.0
+pillow>=10.0,<12.0    # _thumb() display-thumbnail downscale in app.py (also a streamlit dependency
+                      # and used by scripts/generate_adversarial.py); imported lazily, soft-disables if absent

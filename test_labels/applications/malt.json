@@ -1,0 +1,51 @@
+{
+  "_meta": {
+    "product": "Malt & Hop Brewery - 'Honey Huckleberry Pie' (Ale)",
+    "beverage": "malt",
+    "checklist": "supporting_docs/CHECKLIST_OF_MANDATORY_LABEL_INFO/malt-beverage-labeling-checklist-information.pdf (27 CFR part 7 + 16 + 25)",
+    "clean_baseline_front": "test_labels/baseline_labels/baseline_2_Front.png",
+    "clean_baseline_back": "test_labels/baseline_labels/baseline_2_Other.png",
+    "source": "All values transcribed from baseline_2 (front + back). The verifier reports beverage_type 'beer' for malt.",
+    "note": "Top-level keys are the COMPLETE set of mandatory label items for a malt beverage. verify() consumes brand_name, class_type, alcohol_content, net_contents, name_and_address, country_of_origin; the rest are part of the application for completeness (see _checklist)."
+  },
+
+  "brand_name": "Malt & Hop Brewery",
+  "fanciful_name": "Honey Huckleberry Pie",
+  "class_type": "Ale with Honey and Huckleberry Flavor",
+  "statement_of_composition": "Ale with Honey and Huckleberry Flavor",
+  "alcohol_content": "5% Alc./Vol.",
+  "net_contents": "1 PINT 0.9 FL. OZ.",
+  "name_and_address": "Brewed & Bottled By Malt & Hop Brewery, Hyattsville, MD",
+  "health_warning": "GOVERNMENT WARNING: (1) According to the Surgeon General, women should not drink alcoholic beverages during pregnancy because of the risk of birth defects. (2) Consumption of alcoholic beverages impairs your ability to drive a car or operate machinery, and may cause health problems.",
+  "country_of_origin": null,
+
+  "_checklist": {
+    "brand_name":            {"citation": "27 CFR 7.64",  "applies": "yes", "verifier_checks": "partial (fuzzy vs brand/fanciful union; brand vs fanciful-name read is unstable)"},
+    "fanciful_name":         {"citation": "27 CFR part 7 subpart I", "applies": "conditional - OPTIONAL in general; REQUIRED only when the malt beverage is not known to the trade under a particular class/type and uses the distinctive-name + statement-of-composition designation path (approved formula). A fanciful name alone does NOT satisfy the class/type designation.", "verifier_checks": "no (now a DEDICATED evidence-only extraction field 'fanciful_name'; should match the application 'Fanciful Name'; NOT consumed by verify() -> reviewer-only / not verifier-judged)"},
+    "class_type":            {"citation": "27 CFR 7.63",  "applies": "yes - the designation (a class/type OR a distinctive name + statement of composition) is universally required", "verifier_checks": "partial (fuzzy)"},
+    "statement_of_composition": {"citation": "27 CFR 7.63 / subpart I", "applies": "conditional - REQUIRED when using the distinctive/fanciful-name + composition designation path (e.g. flavored/formula products); applies here ('Ale with Honey and Huckleberry Flavor')", "verifier_checks": "no (now a DEDICATED evidence-only extraction field 'statement_of_composition'; NOT consumed by verify() -> reviewer-only / not verifier-judged)"},
+    "alcohol_content":       {"citation": "27 CFR 7.65",  "applies": "conditional - TRIGGERED here (alcohol from added honey/huckleberry FLAVOR); also mandatory if a State requires it", "verifier_checks": "yes (numeric match + NOTATION now checked; the flavor TRIGGER is NOT modeled, so a missing flavored-malt ABV would wrongly PASS)"},
+    "net_contents":          {"citation": "27 CFR 7.70",  "applies": "yes (U.S. customary units)", "verifier_checks": "partial (unit-aware VOLUME compare incl. compound '1 PINT 0.9 FL OZ'; largest-whole-unit / U.S.-customary FORMAT rule not validated)"},
+    "name_and_address":      {"citation": "27 CFR 7.66",  "applies": "yes (domestic - bottler; per the checklist this is conditional on being wholly fermented in the U.S.)", "verifier_checks": "partial (punctuation/relationship-prefix-normalized fuzzy + coverage guard; no-intervening-text not checked; on this product the block is on the FRONT label)"},
+    "health_warning":        {"citation": "27 CFR part 16","applies": "yes", "verifier_checks": "yes (exact wording + ALL-CAPS + S/G deterministic; BOLD confidence-gated and run-to-run unstable; checked from the label)"},
+    "country_of_origin":     {"citation": "27 CFR 7.69",  "applies": "no (domestic)", "verifier_checks": "yes (when imported)"}
+  },
+
+  "_layout_typography_structural": {
+    "designation_separate_and_apart": "27 CFR 7.52(b) - the designation must be separate and apart from other info -> structural / out-of-scope",
+    "health_warning_single_statement": "27 CFR part 16 - the warning must be one statement -> structural / out-of-scope",
+    "health_warning_separate_and_apart": "27 CFR part 16 - warning separate and apart from other info -> structural / out-of-scope",
+    "health_warning_bold_typography": "27 CFR part 16 - 'GOVERNMENT WARNING' CAPS + BOLD and S/G capitalization; caps + S/G deterministic, BOLD confidence-gated and machine-unreliable -> reviewer-leaning",
+    "aspartame_caps_separate_and_apart": "27 CFR 7.63(b)(4) - IF aspartame used, declaration in CAPITALS, separate and apart (n/a here)"
+  },
+
+  "_not_applicable": {
+    "country_of_origin": "domestic; imports only",
+    "importer_name_and_address": "n/a (domestic; 27 CFR 7.67-7.68 imports only)",
+    "fdc_yellow_5": "absent (27 CFR 7.63(b)(1))",
+    "cochineal_or_carmine": "absent (27 CFR 7.63(b)(2))",
+    "sulfite_declaration": "absent - no >=10ppm SO2 (27 CFR 7.63(b)(3))",
+    "aspartame_declaration": "absent (27 CFR 7.63(b)(4))",
+    "formula_number": "UNMODELED - flavored malt likely requires an approved formula; application-side data not modeled"
+  }
+}
