@@ -1,0 +1,40 @@
+# Everything dev-only stays OUT of the deployment upload/build context.
+# What ships: the Next.js app (src/, configs), api/, the three engine modules
+# (config.py, extraction.py, verification.py), requirements.txt, README.md.
+
+# Local environments & tool caches
+.audit-venv/
+.devcontainer/
+.claude/
+.pytest_cache/
+__pycache__/
+node_modules/
+.next/
+
+# Secrets & local config (defense in depth — also gitignored)
+.streamlit/
+
+# Test data, fixtures, harnesses, experiments
+adversarial/
+bold_safety/
+eval/
+scripts/
+test_labels/
+tests/
+
+# Run artifacts & scratch
+archive/
+artifacts/
+output/
+
+# Docs & references not needed at runtime
+docs/
+supporting_docs/
+AGENTS.md
+BENCHMARK_NOTES.md
+CLAUDE.md
+
+# The legacy Streamlit UI and its extra deps (replaced by the Next.js frontend)
+app.py
+requirements-streamlit.txt
+requirements-dev.txt
