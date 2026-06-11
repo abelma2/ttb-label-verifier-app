@@ -1,5 +1,7 @@
 # --- Secrets: never commit -------------------------------------------------
-.streamlit/
+# Local OpenAI key lives in .secrets/secrets.toml (sourced into OPENAI_API_KEY).
+.secrets/
+.streamlit/          # legacy name, kept ignored defensively
 .env
 .env.*
 !.env.example

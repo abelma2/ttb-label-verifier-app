@@ -12,6 +12,7 @@ node_modules/
 .next/
 
 # Secrets & local config (defense in depth — also gitignored)
+.secrets/
 .streamlit/
 
 # Test data, fixtures, harnesses, experiments, demo assets
