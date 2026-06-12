@@ -22,8 +22,7 @@ import type { VerifyResponse } from "./types.ts";
  *  all 8 run in parallel as separate function invocations. */
 export const BATCH_CONCURRENCY = 8;
 
-/** Short error labels for the results table (ported from the prototype,
- *  extended with the client-side kinds). Full messages show in the detail view. */
+/** Short error labels for the results table. Full messages show in the detail view. */
 export const ERROR_SHORT: Record<string, string> = {
   auth: "service not set up",
   quota: "service out of credits",
@@ -74,8 +73,7 @@ export interface BatchProgress {
 
 /** Run every product through the verify API with bounded concurrency.
  *  Aborting the signal stops scheduling and rejects with VerifyError("cancelled").
- *  `verifyFn` is injectable for tests (mirroring how the API tests monkeypatch
- *  extract_fields); production always uses the real verifyImages. */
+ *  `verifyFn` is injectable for tests; production always uses the real verifyImages. */
 export async function runBatch(
   products: Product<File>[],
   applicationFor: (label: string) => AppRow | null,

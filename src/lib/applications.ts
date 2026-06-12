@@ -31,7 +31,6 @@ export interface ParsedApplications {
   warnings: string[];
 }
 
-/** Extensions the application-file inputs accept (Excel workbooks only). */
 export const EXCEL_EXTENSIONS = [".xlsx", ".xls", ".xlsm"] as const;
 export const EXCEL_ACCEPT = EXCEL_EXTENSIONS.join(",");
 
@@ -41,7 +40,6 @@ const MAX_APP_FILE_BYTES = 10 * 1024 * 1024;
 
 export const TEMPLATE_FILENAME = "ttb-application-template.xlsx";
 
-/** Normalize a column name: 'Brand Name' / 'brand-name' -> 'brand_name'. */
 export function normHeader(key: string): string {
   return String(key).trim().toLowerCase().replace(/[\s\-]+/g, "_");
 }
@@ -90,7 +88,6 @@ function gridRows(grid: unknown[][]): Record<string, unknown>[] {
 /** Shared tail of every parse path: normalize header spelling, key rows by
  *  lowercased product, report duplicates and missing field columns. */
 function rowsToMapping(rawRows: Record<string, unknown>[]): ParsedApplications {
-  // normalize header/key spelling so 'Brand Name' / 'brand-name' both work
   const rows = rawRows.map((row) =>
     Object.fromEntries(Object.entries(row).map(([k, v]) => [normHeader(k), v])),
   );

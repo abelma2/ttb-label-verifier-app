@@ -41,7 +41,6 @@ export function cleanApplication(values: ApplicationData): ApplicationData | nul
 const FETCH_TIMEOUT_MS = 75_000;
 
 function deadlineSignal(external?: AbortSignal): AbortSignal | undefined {
-  // Modern path: compose the external cancel signal with a timeout deadline.
   if (typeof AbortSignal.timeout === "function" && typeof AbortSignal.any === "function") {
     const timeout = AbortSignal.timeout(FETCH_TIMEOUT_MS);
     return external ? AbortSignal.any([external, timeout]) : timeout;

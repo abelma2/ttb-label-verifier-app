@@ -56,7 +56,6 @@ except ImportError:  # Vercel runs index.py as a top-level module, not a package
 
 logger = logging.getLogger("api")
 
-# --- upload limits ------------------------------------------------------------
 # Vercel serverless functions reject request bodies over 4.5 MB before our code
 # runs, so we enforce a slightly lower total here to own the error message; the
 # frontend downscales images client-side (to the model's effective input size)

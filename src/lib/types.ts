@@ -123,7 +123,6 @@ export interface ErrorResponse {
   error: { kind: string; message: string };
 }
 
-/** Human-readable labels for engine field names. */
 export const FIELD_LABELS: Record<string, string> = {
   brand_name: "Brand name",
   class_type: "Class / type designation",

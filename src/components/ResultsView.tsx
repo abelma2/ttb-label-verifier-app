@@ -232,9 +232,6 @@ export function ProductReport({
       aria-label="Verification results"
       className="lg:grid lg:grid-cols-[300px,minmax(0,1fr)] lg:items-start lg:gap-5"
     >
-      {/* Label preview sidebar: horizontal strip on small screens, sticky
-          column on large ones so the label stays beside the results while
-          scrolling the field verdicts. */}
       <aside
         aria-label="Label preview"
         className="mb-4 flex gap-3 overflow-x-auto lg:sticky lg:top-6 lg:mb-0 lg:block lg:space-y-3 lg:overflow-visible"
