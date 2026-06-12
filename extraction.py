@@ -380,13 +380,13 @@ def _create_with_fallbacks(client, content, params):
             last = exc
             msg = str(exc)
             if ("json_schema" in msg or "response_format" in msg) and params.get("response_format") != _JSON_OBJECT_RF:
-                params["response_format"] = _JSON_OBJECT_RF   # Structured Outputs unsupported
+                params["response_format"] = _JSON_OBJECT_RF
                 logging.getLogger(__name__).warning(
                     "Structured Outputs unsupported by %s; fell back to json_object "
                     "(response shape is now enforced by _coerce, not the API).",
                     params.get("model"))
             elif "reasoning_effort" in msg and params.get("reasoning_effort") == "minimal":
-                params["reasoning_effort"] = "low"            # model rejects 'minimal'
+                params["reasoning_effort"] = "low"
             else:
                 raise
     raise last
@@ -444,7 +444,7 @@ def _apply_warning_supplement(extracted: dict, supp: dict | None) -> dict:
     gw = extracted.get("government_warning")
     if not isinstance(gw, dict):
         return extracted
-    if gw.get("warning_observer") is not None:   # already merged -- keep the evidence intact
+    if gw.get("warning_observer") is not None:
         return extracted
     if supp is None:
         gw["warning_observer"] = "main-fallback"

@@ -207,7 +207,7 @@ def _parse_volume(s):
     fuzzy string compare."""
     if not s:
         return None
-    text = re.sub(r"(?<=\d),(?=\d)", "", str(s).lower())     # join thousands separators
+    text = re.sub(r"(?<=\d),(?=\d)", "", str(s).lower())
     primary = re.sub(r"\([^)]*\)", " ", text)                # a parenthetical restates, it does not add
     if not any(rx.search(primary) for rx, _ in _VOLUME_PART_RES):
         primary = text                                       # the only declaration was inside the parens
@@ -461,7 +461,6 @@ def _check_abv(field_obj, expected, beverage_type, class_obj) -> FieldResult:
     if label_abv is None:
         base = _abv_missing_by_class(beverage_type, class_obj)
         if app_abv is not None and base.status == PASS:
-            # class doesn't require it, but the application lists one -> worth a look
             return FieldResult("alcohol_content", "", expected, REVIEW,
                                "no alcohol content on the label, but the application lists one — please verify")
         return FieldResult("alcohol_content", base.extracted, expected or base.expected,
@@ -563,13 +562,12 @@ def _check_appellation(beverage_type, class_obj, vintage_obj, appellation_obj) -
     if not required:
         return FieldResult("appellation", "", "", PASS,
                            "not required (label shows no varietal, vintage, or semi-generic type)")
-    # the appellation may be embedded in the class/type designation, e.g. "American Moscato"
     embedded = _appellation_in_text(class_value)
     if embedded:
         return FieldResult("appellation", embedded, "", PASS,
                            f"appellation '{embedded}' appears in the class/type designation "
                            f"(required because the label shows {why})")
-    if present:   # present but unreadable
+    if present:
         return FieldResult("appellation", "", "", REVIEW,
                            f"appellation appears present but could not be read — required because "
                            f"the label shows {why}; please verify")

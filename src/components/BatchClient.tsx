@@ -17,7 +17,6 @@ import { ProductReport } from "./ResultsView";
 
 type Phase = "idle" | "running" | "done";
 
-/** Detail-list filter: every result key plus "all" (the default view). */
 type DetailFilter = "all" | Status | "error";
 
 const STATUS_LABEL: Record<Status, string> = {
@@ -47,9 +46,6 @@ function fileKey(f: File): string {
   return `${f.name}|${f.size}|${f.lastModified}`;
 }
 
-/** One product's detail report with its label-preview sidebar: builds object
- *  URLs for the product's files (revoked on change/unmount) and hands them to
- *  ProductReport so the images sit beside the validation results. */
 function DetailReport({
   item,
   product,

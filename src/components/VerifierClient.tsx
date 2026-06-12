@@ -78,7 +78,6 @@ export default function VerifierClient() {
     });
   }, [prefill, frontStem]);
 
-  // Object URLs for the verified files (results sidebar), revoked on change/unmount.
   useEffect(() => {
     if (!verifiedFiles) {
       setResultImages([]);
@@ -117,8 +116,8 @@ export default function VerifierClient() {
       // a late completion after Start over / a newer verify must not clobber state
       if (abortRef.current !== controller) return;
       setResult(response);
-      setResultSig(inputSig); // remember which inputs this verdict came from
-      setVerifiedFiles({ front, back }); // the files this verdict was read from
+      setResultSig(inputSig);
+      setVerifiedFiles({ front, back });
       setPhase("done");
       setAnnouncement(
         `Verification complete: ${OVERALL_ANNOUNCEMENT[response.overall] ?? response.overall}. ` +
