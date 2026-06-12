@@ -15,7 +15,8 @@ node_modules/
 .secrets/
 .streamlit/
 .env
-.env.*        # incl. .env.example — the key comes from Vercel's dashboard, not a file
+# incl. .env.example — the key comes from Vercel's dashboard, not a file
+.env.*
 
 # Test data, fixtures, harnesses, experiments, demo assets
 private/
@@ -32,7 +33,8 @@ archive/
 artifacts/
 output/
 
-# Docs & references not needed at runtime
+# Docs & references not needed at runtime (.github = README screenshots + CI metadata)
+.github/
 docs/
 supporting_docs/
 AGENTS.md
