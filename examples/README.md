@@ -1,24 +1,25 @@
-# Example label — try the app in one minute
+# Example labels — try the app in a minute
 
-A synthetic, compliant malt-beverage label (fictional brand) you can use to see the
+Ready-to-use label images covering spirits, wine, and an import, so you can see the
 verifier work without hunting for your own bottle photos.
 
-| File | What it is |
+| File(s) | What it is |
 | --- | --- |
-| `malt_and_hop_Front.jpg` | front label (brand, class, ABV, net contents, address) |
-| `malt_and_hop_Other.jpg` | back label (government warning lives here) |
-| `malt_and_hop_application.json` | the values "the applicant submitted", for label-vs-application matching |
+| `ABC.jpg` | synthetic **spirits** label (rye whisky) — front and back panels in one flat image: brand, class, ABV, net contents, address, government warning |
+| `brand-label-new2.jpg` | synthetic **imported** liqueur label, one flat image — exercises the country-of-origin / imported-by case |
+| `clear_baseline_3_Front.png` + `clear_baseline_3_Other.png` | synthetic **wine** label as a front + back pair — varietal, vintage, and appellation exercise the wine-only appellation check |
+| `test_8_Front.jpeg` + `test_8_Other.jpeg` | real bottle **photos** (wine), front + back pair — what curved-glass, real-lighting input looks like |
 
-**Quick demo (single mode):** upload `malt_and_hop_Front.jpg` as the front and
-`malt_and_hop_Other.jpg` as the back, leave the form blank, and verify — that's the
-rules-only screening. Every field should come back green (the bold read on the warning
-occasionally lands on "needs review"; that's the fail-closed design, not a bug).
+**Quick demo (single mode):** upload `ABC.jpg` as the front label, leave the form blank,
+and verify — that's the rules-only screening. For the paired sets, upload the `_Front`
+file as the front and the `_Other` file as the back; both images are read together as
+one label.
 
-**Label-vs-application matching:** same uploads, but load
-`malt_and_hop_application.json` into the application form first (it auto-matches by the
-filename stem `malt_and_hop`), then verify. Now each field is also compared against the
-submitted value. Edit a value (e.g. change the ABV to 7%) and re-run to see a mismatch
-get caught.
+**Label-vs-application matching:** type values into the application form before
+verifying (for `ABC.jpg`, try brand `ABC`, class `Straight Rye Whisky`, alcohol `45%
+Alc/Vol`, net contents `750 mL`) — then change one value and re-run to watch the
+mismatch get caught.
 
-**Batch mode:** drop both images in together — they pair into one product by filename —
-and optionally add the JSON as the application file.
+**Batch mode:** drop several files in together. Files pair into products by filename
+stem (`test_8_Front` + `test_8_Other` become one product `test_8`), and each single
+flat image is its own product.
