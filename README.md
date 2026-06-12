@@ -144,23 +144,20 @@ its type syntax).
 
 ## The engine: how verification works
 
-1. **Extraction** (`extraction.py`) — the vision model reads the image(s) and returns a
-   fixed JSON schema (Structured Outputs, with a JSON-mode fallback). Each field is
+1. **Extraction** (`extraction.py`) — the vision model reads the image(s) — front +
+   back together as one label — and returns a fixed JSON schema. Each field is
    `{present, value, confidence}`, distinguishing "absent from the label" from "present
-   but unreadable". The model only transcribes and reports what it sees; it never judges
-   compliance and never sees the expected values. Front + back images of one product are
-   read together as one label.
+   but unreadable". The model only transcribes what it sees; it never judges compliance
+   and never sees the expected values.
 2. **Verification** (`verification.py`) — deterministic comparison per field type:
-   fuzzy match for brand/class (against the union of the application's brand/fanciful
-   and class/composition values, with a near-miss typo guard), numeric ABV comparison
-   with the class-dependent presence rule (required for spirits, conditional for wine,
-   optional for beer) plus label-only notation and proof = 2×ABV checks, unit-aware
-   volume comparison for net contents, forgiving subset matching for name/address and
-   country, and the fail-closed government-warning gate. The name/address read is the
-   U.S. responsible party's statement — on imported products the importer's "IMPORTED
-   BY" line, with any other producer/bottler statement surfaced separately as evidence —
-   and is compared without the leading "BOTTLED BY"-style phrase. Overall = worst field
-   status; low-confidence reads escalate pass → needs review.
+   fuzzy brand/class match against the union of the application's brand/fanciful and
+   class/composition values (with a near-miss typo guard); ABV with the class-dependent
+   presence rule (required for spirits, conditional for wine, optional for beer) plus
+   label-only notation and proof = 2×ABV checks; unit-aware volume comparison for net
+   contents; forgiving subset matching for name/address (the U.S. responsible party —
+   on imports the importer; other producer/bottler statements surface as evidence) and
+   country; and the fail-closed government-warning gate. Overall = worst field status;
+   low-confidence reads escalate pass → needs review.
 
 ### Regulatory grounding
 
@@ -168,36 +165,25 @@ Rules are grounded in the three TTB Beverage Alcohol Manuals (cited in `config.p
 TTB's "Checklist of Mandatory Label Information" per class:
 
 - **Government warning** (27 CFR part 16) — exact wording; "GOVERNMENT WARNING" in caps
-  **and bold**; "S"/"G" in Surgeon General capitalized. The whole warning block is read
-  by a **dedicated second reader** (`WARNING_SUPPLEMENT_MODEL`, default `gpt-4.1`) that
-  runs in parallel with the main extraction: ground-truth testing showed the focused
-  cross-family read is exact on transcription (81/81), case-faithful (catches title-case),
-  faithful on reworded warnings (transcribes, doesn't recite), and 100% accurate on the
-  full warning verdict (60/60 ground-truth labels) — versus 70% for the main
-  full-extraction read, whose bold reads are unstable at every confidence level.
-  Wording and caps are then judged
-  deterministically from that transcription; the bold gate (`supplement_gate`, the
-  default) is deliberately simple — read as bold → pass; read as **not** bold → needs
-  review (confirm against the label image shown beside the verdicts); unreadable → needs
-  review. Confidence is ignored, a reader disagreement is recorded as evidence (never
-  arbitrated), bold can never fail a label, and when only one of the two readers finds a
-  warning at all, the absence verdict is a review rather than a one-reader fail. The
-  body-bold observation rides along as a note. (Single-model modes remain selectable:
-  `WARNING_BOLD_POLICY=note_null_review`, `header_simple_gate`, `note`,
-  `header_medium_gate`, `medium_pass_gate`, `header_body_gate`, and the older
-  `confidence_gate`/`review`/`trust_model` — see `config.py`.)
+  **and bold**; "S"/"G" in Surgeon General capitalized. The warning is read by a
+  **dedicated second model** (`WARNING_SUPPLEMENT_MODEL`) in parallel with the main
+  extraction — on ground truth it scored 100% on the full warning verdict (60/60) versus
+  70% for the main read, and it transcribes what is printed rather than reciting the
+  federal text. Wording and caps are judged deterministically from that transcription;
+  bold at worst routes to **needs review** (confirm against the label image beside the
+  verdicts) — it can never fail a label. When only one of the two readers finds a
+  warning at all, absence is a review, never a one-reader fail.
 - **Alcohol content** — class-dependent presence; bare "ABV" notation fails (not a TTB
   form); a proof inconsistent with the stated ABV fails.
 - **Wine appellation** — conditionally mandatory when the label shows a varietal,
-  vintage, semi-generic designation, or estate claim (27 CFR 4.25/4.34). The appellation
-  may be U.S. (state, county, AVA) or a foreign region / controlled designation — on
-  imported wine the region printed near the brand (e.g. "CHAMPAGNE") is read as the
-  appellation.
+  vintage, semi-generic designation, or estate claim (27 CFR 4.25/4.34); a U.S. origin
+  (state, county, AVA) or a foreign region (e.g. "CHAMPAGNE" near the brand) both
+  satisfy it.
 
-Conditional disclosures whose triggers aren't visible are surfaced for the reviewer
-with deliberately no automated pass/fail: the sulfite declaration is extracted into its
-own evidence-only field, and the rest (FD&C Yellow #5, aspartame, age statements, …)
-are transcribed verbatim into `additional_statements`.
+Conditional disclosures whose triggers aren't visible get no automated pass/fail: the
+sulfite declaration is extracted into its own evidence-only field; the rest (FD&C
+Yellow #5, aspartame, age statements, …) are transcribed verbatim into
+`additional_statements` for the reviewer.
 
 ### Assumptions & limitations
 
@@ -205,11 +191,8 @@ are transcribed verbatim into `additional_statements`.
 - Standard-of-fill container sizes, type-size/legibility rules, and "same field of
   vision" layout rules are out of scope (layout/geometry isn't reliably verifiable from
   one photo).
-- The vision model isn't perfectly deterministic; the warning check absorbs this (near
-  misses go to review, never silent passes). The main model's warning reads — bold
-  especially — vary run to run, which is why the whole warning block is judged from the
-  dedicated parallel warning reader (100% warning-verdict accuracy and perfect rerun
-  stability on ground truth) and bold can route to review but never fail.
+- The vision model isn't perfectly deterministic; the checks absorb this — near misses
+  go to review, never silent passes.
 - This calls an external vision API; a production deployment inside TTB's network would
   need an on-prem or allowlisted model.
 
