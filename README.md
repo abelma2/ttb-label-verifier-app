@@ -50,8 +50,8 @@ config.py             regulatory constants & tunable thresholds (some env-overri
 extraction.py         vision extraction -> fixed JSON schema
 verification.py       deterministic verification -> pass/needs_review/fail per field
 tests/                test_verification.py (engine) + test_api.py (API glue; mocks the model)
-examples/             demo labels + walkthrough README (type application values manually,
-                      or start from the in-app Excel template)
+examples/             demo labels + a filled-in application spreadsheet + walkthrough
+                      README (batch mode matches the spreadsheet; single mode is typed)
 next.config.ts        dev proxy / prod rewrite for /api/py/*
 requirements.txt      lean deploy manifest (requirements-dev.txt adds uvicorn, pytest, …)
 vercel.json           Python function config (maxDuration)
