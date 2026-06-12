@@ -42,7 +42,9 @@ Austin-Belman-APPROACH.pdf
 BENCHMARK_NOTES.md
 CLAUDE.md
 
-# The legacy Streamlit UI and its extra deps (replaced by the Next.js frontend)
+# The legacy Streamlit UI and its deps (replaced by the Next.js frontend)
 app.py
 requirements-streamlit.txt
+
+# Dev/test tooling manifest — used by `npm run setup` and CI, not needed at runtime
 requirements-dev.txt

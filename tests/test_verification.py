@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import verification
 import extraction
 from config import GOVERNMENT_WARNING
-from extraction import _coerce, _build_content, _model_params, _parse_response, ExtractionError
+from extraction import _coerce, _image_blocks, _model_params, _parse_response, ExtractionError
 from verification import (
     verify, verify_label_only,
     _check_text, _check_abv, _check_net_contents, _check_country,
@@ -1307,26 +1307,21 @@ def test_verify_label_only_omits_country_and_has_six_fields():
 
 # --- multi-image extraction input (front + back of one product) --------------
 
-def _image_blocks(content):
-    return [b for b in content if b["type"] == "image_url"]
+def test_image_blocks_single_bytes_back_compat():
+    blocks = _image_blocks(b"frontbytes", "image/png")
+    assert len(blocks) == 1
+    assert blocks[0]["type"] == "image_url"
 
 
-def test_build_content_single_bytes_back_compat():
-    content = _build_content(b"frontbytes", "image/png")
-    assert content[0]["type"] == "text"
-    assert len(_image_blocks(content)) == 1
-
-
-def test_build_content_multiple_images_front_and_back():
-    content = _build_content([(b"front", "image/png"), (b"back", "image/jpeg")])
-    blocks = _image_blocks(content)
+def test_image_blocks_multiple_images_front_and_back():
+    blocks = _image_blocks([(b"front", "image/png"), (b"back", "image/jpeg")])
     assert len(blocks) == 2
     assert blocks[1]["image_url"]["url"].startswith("data:image/jpeg;base64,")
 
 
-def test_build_content_list_of_bare_bytes():
-    content = _build_content([b"front", b"back"])
-    assert len(_image_blocks(content)) == 2
+def test_image_blocks_list_of_bare_bytes():
+    blocks = _image_blocks([b"front", b"back"])
+    assert len(blocks) == 2
 
 
 def test_model_params_gpt4_family_uses_temperature():
