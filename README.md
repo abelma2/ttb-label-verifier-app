@@ -55,52 +55,6 @@ vercel.json           Python function config (maxDuration)
 .vercelignore         keeps all dev/test/tooling content out of deployments
 ```
 
-## Key decisions (and why)
-
-- **Engine stays at the repo root, imported via `sys.path`.** `api/index.py` prepends the
-  repo root to `sys.path`. Vercel's Python builder bundles all non-ignored project files
-  into the function by default, so the engine modules ship automatically — `.vercelignore`
-  is the mechanism that scopes the bundle. Considered: copying the engine into `api/`
-  (rejected — two diverging copies of regulatory logic) and packaging it
-  (rejected — pyproject/src-layout machinery is overkill for a three-module engine that
-  other in-repo harnesses import directly).
-- **The API layer is deliberately thin.** Upload validation (count, size, magic-byte
-  sniffing — the client's Content-Type is never trusted), application-JSON validation
-  (Pydantic, `extra="forbid"` so a drifted frontend fails loudly), engine orchestration,
-  and `extraction.failure_kind()` → HTTP status mapping. Nothing else.
-- **Engine invariants are enforced at the boundary.** The extractor never receives
-  application data; a blank form runs rules-only screening (`verify_label_only`) and is
-  never auto-filled from the model's own read — that would let the model grade itself.
-- **Type safety end to end.** Pydantic request/response models (`api/_models.py`)
-  mirrored 1:1 by TypeScript types (`src/lib/types.ts`); the response is the engine's
-  `FieldResult` contract serialized verbatim.
-- **Vercel's 4.5 MB body limit is handled client-side first.** Images over ~1.8 MB are
-  downscaled in the browser to ≤2048 px and re-encoded as JPEG — lossless for the model,
-  whose high-detail vision pipeline caps input at 2048 px anyway. The API still enforces
-  hard limits (4 MB/file, 4.3 MB total) with clear JSON errors, so no raw 413/500 ever
-  reaches the user.
-- **Tailwind v3, not v4.** v4's native engine (lightningcss/oxide) ships no 32-bit
-  Windows binaries and the dev machine runs 32-bit Node; v3 is pure JS with identical
-  output for this UI. Swap to v4 if your toolchain is 64-bit.
-- **`requirements.txt` is the deploy manifest** (fastapi, pydantic, python-multipart,
-  openai, rapidfuzz). Dev/test tooling lives in `requirements-dev.txt`.
-- **Batch mode is client-side orchestration, not a batch endpoint.** A server-side
-  thread-pool fan-out (how the retired Streamlit prototype did it) fights both the
-  4.5 MB body limit and the per-invocation duration cap on serverless. Instead the
-  browser groups files into products (the `_Front`/`_Other` filename-stem convention),
-  then issues one `/api/py/verify` request per product with a small concurrency pool —
-  each product is its own serverless invocation, so the platform does the scaling and
-  one bad product becomes an error row, never a sunk batch. The grouping and
-  application-file parsing logic lives in `src/lib/stem.ts` and
-  `src/lib/applications.ts`, pinned by unit tests run with Node's built-in test runner
-  (`npm run test:web` — no extra test toolchain for ~20 pure-function assertions).
-- **One deliberate omission:** there is no "copy extracted values into the form"
-  convenience. The application must stay an independent witness; the web UI only accepts
-  applicant-supplied values (typed, or prefilled from an application file).
-- **Products are capped at 4 images** (front, back/other, neck/strip) — a consequence of
-  the 4.5 MB serverless request budget. The batch preview flags any over-limit stem
-  group *before* the run instead of letting it fail mid-batch.
-
 ## Environment variables
 
 | Variable | Required | Purpose |
@@ -157,18 +111,6 @@ pytest                       # engine tests + API-layer tests
 npm run test:api             # just the API layer
 npm run test:web             # batch grouping / application-file parsing (node:test)
 ```
-
-## Try it in one minute
-
-`examples/` has a synthetic, compliant malt-beverage label (fictional brand):
-upload `malt_and_hop_Front.jpg` + `malt_and_hop_Other.jpg` in the app and click
-verify — that's the rules-only screening. Load `malt_and_hop_application.json`
-into the form first to see label-vs-application matching, and change a value
-(say, the ABV) to watch a mismatch get caught. Details in
-[examples/README.md](examples/README.md).
-
-The development-time harnesses (model benchmarks, the scored eval) live on the
-[`dev-archive`](../../tree/dev-archive) branch.
 
 ## Deploying to Vercel
 
