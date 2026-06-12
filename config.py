@@ -32,17 +32,38 @@ GOVERNMENT_WARNING_HEADER = "GOVERNMENT WARNING"
 WARNING_WORDING_REVIEW_FLOOR = 90
 
 # Bold handling policy for the government warning. Modes:
-#   "header_medium_gate" -- DEFAULT (since 2026-06-11, product decision): only the HEADER bold
-#                    rule gates the verdict. PASS when header_bold True at MEDIUM-or-high
-#                    confidence (on top of wording + ALL-CAPS); FAIL only on a HIGH-confidence
+#   "note_null_review" -- DEFAULT (since 2026-06-12, per reviewer guidance that bold is not
+#                    expected to be machine-verifiable from photos with a VLM): a DETERMINATE
+#                    header_bold observation (True or False, any confidence) NEVER gates -- the
+#                    warning PASSES with the observation recorded on the reason for the reviewer
+#                    to confirm against the on-screen label image. Only a NULL read (the model
+#                    could not see the header well enough to form an observation) goes to
+#                    needs-review, as a readability flag ("could not confirm ..." -- reframed by
+#                    the image-quality machinery on flagged photos). Nothing about bold can ever
+#                    FAIL a label. Measured basis (bold_safety, repeated runs): observations were
+#                    stable on only ~6/20 labels across reruns and even high-confidence reads
+#                    flipped, so every gating variant either flooded review (~50% false flags on
+#                    compliant labels at ~85% catch) or caught little; this mode is the explicit
+#                    "don't pretend" point on that curve. body_bold stays a recorded note.
+#   "header_simple_gate" -- prior default (2026-06-12, env-selectable): observation alone,
+#                    confidence ignored -- True -> PASS, False -> NEEDS REVIEW (human confirms),
+#                    null -> FAIL ("submit a clearer label image"). The strongest screening
+#                    variant short of the confidence gates; use it if bold catch-rate matters.
+#   "note"        -- earlier 2026-06-12 default (env-selectable): bold NEVER gates the verdict;
+#                    an otherwise-valid warning PASSES with the header/body bold observations
+#                    recorded on the reason. Chosen when bold reads proved unstable even at high
+#                    confidence; superseded the same day because a "not bold" observation was
+#                    judged worth a human look (review) rather than a buried pass-note.
+#   "header_medium_gate" -- the prior default (2026-06-11 -- 2026-06-12, env-selectable): only the
+#                    HEADER bold rule gates the verdict. PASS when header_bold True at MEDIUM-or-
+#                    high confidence (on top of wording + ALL-CAPS); FAIL only on a HIGH-confidence
 #                    header_bold False; anything else (null / low, or a medium-confidence
 #                    violation) -> needs-review. body_bold is TRACKED -- a med/high-confidence
 #                    bold-body observation is appended to the reason as a note (and always stays
-#                    in the raw extraction) -- but it never decides pass/review/fail. Known cost:
-#                    an all-bold-body label with a bold header now PASSES; the two-rule gates
+#                    in the raw extraction) -- but it never decides pass/review/fail. An all-bold-
+#                    body label with a bold header PASSES under this gate; the two-rule gates
 #                    below were added precisely because the old header-only gate auto-passed ~93%
-#                    of all-bold-body violations, and accepting that gap again is the explicit
-#                    product call here (the note keeps the observation visible to reviewers).
+#                    of all-bold-body violations.
 #   "medium_pass_gate" -- the prior default (2026-06-11, per course-staff guidance that the bold
 #                    PASS gate need not demand high confidence). 27 CFR 16.22 has TWO visual rules:
 #                    "GOVERNMENT WARNING" must be bold, AND the remainder/body may NOT be bold.
@@ -65,13 +86,12 @@ WARNING_WORDING_REVIEW_FLOOR = 90
 #   "confidence_gate" -- older default. Header only: header_bold True + medium/high -> pass; False +
 #                    medium/high -> fail; null/low -> fail-closed. Does NOT check the body (all-bold
 #                    warnings auto-pass). Kept for comparison/benchmarking.
-#   "note"        -- bold is telemetry only; an otherwise-valid warning PASSES with a bold note.
 #   "review"      -- an otherwise-valid warning always goes to needs-review for a human.
 #   "trust_model" -- judge from header_bold alone (True->pass, False->FAIL, None->review),
 #                    ignoring confidence. Not recommended.
 # See BENCHMARK_NOTES.md (dev-archive branch; kept locally for dev) for the bold
 # experiments behind these choices.
-WARNING_BOLD_POLICY = os.environ.get("WARNING_BOLD_POLICY", "header_medium_gate")
+WARNING_BOLD_POLICY = os.environ.get("WARNING_BOLD_POLICY", "note_null_review")
 
 # --- Fuzzy-match thresholds (0-100) for text fields (brand, class/type) -------
 #   score >= FUZZY_PASS          -> pass

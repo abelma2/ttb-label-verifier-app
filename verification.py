@@ -631,11 +631,11 @@ def _check_warning(gw) -> FieldResult:
         present, else fall back to the model's header_all_caps, with caps==False as a
         fail backstop;
       - require the "S" in Surgeon / "G" in General to be capitalized (all-caps is fine);
-      - judge BOLD per config.WARNING_BOLD_POLICY (default "header_medium_gate": only the
-        HEADER rule gates -- PASS on header_bold True at medium-or-high confidence, FAIL only
-        on a high-confidence header_bold False, needs-review otherwise. body_bold is tracked
-        as a note on the reason but never decides the verdict. The two-rule gates that also
-        judge the body remain env-selectable; the inline comment at the bold block documents
+      - handle BOLD per config.WARNING_BOLD_POLICY (default "note_null_review": a
+        determinate header_bold observation never gates -- the warning PASSES with the
+        observation recorded on the reason; only a NULL read (header unreadable) goes to
+        needs-review as a readability flag. Nothing about bold can fail a label.
+        body_bold is a recorded note. The inline comment at the bold block documents
         all policies.)
     Title case fails and an unverifiable bold read goes to review; a near-miss wording read
     goes to needs-review; nothing non-exact ever auto-passes.
@@ -688,10 +688,18 @@ def _check_warning(gw) -> FieldResult:
                                cause="caps")
 
     # Bold handling per config.WARNING_BOLD_POLICY (see config.py for the full description).
-    #   "header_medium_gate" -> DEFAULT. Only the HEADER rule gates: PASS on header_bold True at
-    #                    MEDIUM-or-high confidence; FAIL only on header_bold False at HIGH
-    #                    confidence; review otherwise. body_bold is a tracked note, never a gate.
-    #   "medium_pass_gate" -> prior default (env-selectable). Pass/Review/Fail on BOTH visual rules
+    #   "note_null_review" -> DEFAULT. A determinate observation (True/False, any confidence)
+    #                    PASSES with the observation on the reason; only null -> REVIEW
+    #                    (header unreadable). Bold can never FAIL a label.
+    #   "header_simple_gate" -> prior default (env-selectable). Observation only, confidence
+    #                    IGNORED: True -> PASS, False -> REVIEW, null -> FAIL ("submit a
+    #                    clearer label image"). body_bold is a note.
+    #   "note"            -> earlier default (env-selectable). Bold NEVER gates: an otherwise-valid
+    #                    warning PASSES with the header/body bold observations on the reason.
+    #   "header_medium_gate" -> prior default (env-selectable). Only the HEADER rule gates: PASS on
+    #                    header_bold True at MEDIUM-or-high confidence; FAIL only on header_bold
+    #                    False at HIGH confidence; review otherwise. body_bold is a note.
+    #   "medium_pass_gate" -> older default (env-selectable). Pass/Review/Fail on BOTH visual rules
     #                    (27 CFR 16.22): the header must be bold AND the remainder/body must NOT be
     #                    bold. The PASS gate accepts MEDIUM-or-high confidence; FAIL fires only on a
     #                    HIGH-confidence violation. header_bold alone can never pass.
@@ -708,6 +716,53 @@ def _check_warning(gw) -> FieldResult:
     # diffed line-by-line; a shared PASS/escalate helper remains a deferred future cleanup.
     bold = gw.get("header_bold")
     bold_conf = gw.get("header_bold_confidence", "low")
+    if WARNING_BOLD_POLICY == "note_null_review":
+        # Reviewer guidance (2026-06-12): bold is not expected to be machine-verifiable from
+        # photos, so a determinate observation never gates -- it is recorded for the reviewer
+        # (the label image renders beside the verdicts). Only a null read -- the model could
+        # not see the header well enough to form ANY observation -- goes to review, as a
+        # readability flag ("could not confirm" lets the image-quality machinery reframe it).
+        body_note = ""
+        if gw.get("body_bold") is True and gw.get("body_bold_confidence") in ("medium", "high"):
+            body_note = (" (note: the warning body also reads as bold — recorded as an "
+                         "observation only)")
+        header_obs = {True: "header read as bold", False: "header read as NOT bold"}.get(bold)
+        if header_obs is not None:
+            result = FieldResult("government_warning", text, GOVERNMENT_WARNING, PASS,
+                                 f"wording and capital letters verified; bold is recorded as an "
+                                 f"observation, not a gate ({header_obs} — confirm visually on "
+                                 f"the label image if bold matters)" + body_note, cause="bold")
+            return _escalate(result, gw.get("confidence"))
+        return FieldResult("government_warning", text, GOVERNMENT_WARNING, REVIEW,
+                           f"could not confirm '{GOVERNMENT_WARNING_HEADER}' is in bold — the "
+                           f"header could not be read clearly from this image; please verify"
+                           + body_note, cause="bold")
+    if WARNING_BOLD_POLICY == "header_simple_gate":
+        # Confidence is deliberately ignored: benchmarking showed the model's bold-confidence
+        # carries no signal (high-confidence reads flipped between identical runs). The verdict
+        # map follows the OBSERVED error direction -- the model under-calls bold, so a "yes" is
+        # high-precision (pass) while a "no" is the noisy direction (review, never auto-fail).
+        # A null is about the IMAGE, not the label: a mandatory feature could not be verified,
+        # so the submission fails with a request for a clearer photo ("could not verify" lets
+        # the image-quality machinery reframe it on flagged photos).
+        body_note = ""
+        if gw.get("body_bold") is True and gw.get("body_bold_confidence") in ("medium", "high"):
+            body_note = (" (note: the warning body also reads as bold — recorded as an "
+                         "observation only; body bold does not affect this verdict)")
+        if bold is True:
+            result = FieldResult("government_warning", text, GOVERNMENT_WARNING, PASS,
+                                 "wording, capital letters, and bold header verified" + body_note,
+                                 cause="bold")
+            return _escalate(result, gw.get("confidence"))
+        if bold is False:
+            return FieldResult("government_warning", text, GOVERNMENT_WARNING, REVIEW,
+                               f"the model read '{GOVERNMENT_WARNING_HEADER}' as NOT bold — "
+                               f"please confirm the header's bold type against the label image"
+                               + body_note, cause="bold")
+        return FieldResult("government_warning", text, GOVERNMENT_WARNING, FAIL,
+                           f"could not verify that '{GOVERNMENT_WARNING_HEADER}' is in bold type "
+                           f"from this image; submit a clearer label image" + body_note,
+                           cause="bold")
     if WARNING_BOLD_POLICY == "header_medium_gate":
         # Only the HEADER rule gates the verdict. body_bold NEVER decides pass/review/fail --
         # a med/high-confidence bold-body observation is appended to the reason as a note (and
@@ -824,14 +879,19 @@ def _check_warning(gw) -> FieldResult:
                              "wording, capital letters, and bold header all verified", cause="bold")
         return _escalate(result, gw.get("confidence"))
     if WARNING_BOLD_POLICY == "note":
-        # Bold is telemetry, not a gate: surface the model's observation but never fail/review
-        # on it (benchmarks show bold isn't reliably machine-verifiable -- BENCHMARK_NOTES.md,
-        # dev-archive branch).
-        observed = {True: "model observed bold", False: "model observed NOT bold"}.get(
-            gw.get("header_bold"), "bold not determinable")
+        # Bold is telemetry, not a gate: surface the model's header AND body observations but
+        # never fail/review on them. Real-photo bold reads proved unstable even at high
+        # confidence (identical runs flipped FAIL<->PASS; two confirmed false "not bold" FAILs),
+        # so the observation is for the reviewer to confirm against the on-screen label image.
+        header_obs = {True: "header read as bold", False: "header read as NOT bold"}.get(
+            gw.get("header_bold"), "header bold not determinable")
+        body_obs = {True: "body read as bold — the remainder should NOT be bold",
+                    False: "body read as not bold"}.get(
+            gw.get("body_bold"), "body bold not determinable")
         result = FieldResult("government_warning", text, GOVERNMENT_WARNING, PASS,
-                             f"wording and capital letters verified; header bold is a "
-                             f"model-observed note, not a gate ({observed})", cause="bold")
+                             f"wording and capital letters verified; bold is recorded as an "
+                             f"observation, not a gate ({header_obs}; {body_obs}) — confirm "
+                             f"bold visually on the label image", cause="bold")
         return _escalate(result, gw.get("confidence"))
     return FieldResult("government_warning", text, GOVERNMENT_WARNING, REVIEW,
                        f"wording and ALL-CAPS verified — a reviewer must confirm "

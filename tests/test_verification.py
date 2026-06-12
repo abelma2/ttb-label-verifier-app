@@ -554,8 +554,8 @@ def test_verify_label_only_wine_missing_appellation_fails():
 # --- government warning: the critical fail-closed rule -----------------------
 
 def test_warning_compliant_with_bold_true_passes():
-    # Under the default header_medium_gate policy, wording + ALL-CAPS + a confident bold header
-    # are verified (body_bold is tracked but does not gate), so a compliant warning PASSES.
+    # Under the default note_null_review policy, wording + ALL-CAPS are verified and the
+    # determinate bold observation is recorded (never gated), so a compliant warning PASSES.
     assert _check_warning(warning()).status == PASS
 
 
@@ -568,7 +568,54 @@ def test_warning_note_policy_does_not_gate_on_bold(monkeypatch):
     assert _check_warning(warning(bold=True, bold_confidence="low")).status == PASS
 
 
-# --- header_medium_gate policy (the DEFAULT): header gates at medium+, body is a note -----------
+# --- note_null_review policy (the DEFAULT): observations recorded, only null reviews ------------
+
+def test_note_null_review_truth_table(monkeypatch):
+    monkeypatch.setattr(verification, "WARNING_BOLD_POLICY", "note_null_review")
+    for hb, hc in [(True, "high"), (True, "low"), (False, "high"), (False, "low")]:
+        r = _check_warning(warning(bold=hb, bold_confidence=hc))
+        assert r.status == PASS, f"note_null_review(header_bold={hb}[{hc}]) -> {r.status}"
+        assert "observation" in r.reason
+    for hc in ("high", "low"):
+        assert _check_warning(warning(bold=None, bold_confidence=hc)).status == REVIEW
+
+
+def test_note_null_review_body_bold_is_note_only(monkeypatch):
+    monkeypatch.setattr(verification, "WARNING_BOLD_POLICY", "note_null_review")
+    noted = _check_warning(warning(bold=True, body_bold=True, body_bold_confidence="high"))
+    assert noted.status == PASS and "body" in noted.reason
+    assert _check_warning(warning(bold=None, body_bold=True,
+                                  body_bold_confidence="high")).status == REVIEW
+
+
+# --- header_simple_gate policy (prior default, env-selectable): observation only ----------------
+
+def test_header_simple_gate_truth_table(monkeypatch):
+    monkeypatch.setattr(verification, "WARNING_BOLD_POLICY", "header_simple_gate")
+    table = [
+        ((True,  "high"), PASS), ((True,  "medium"), PASS), ((True,  "low"), PASS),
+        ((False, "high"), REVIEW), ((False, "medium"), REVIEW), ((False, "low"), REVIEW),
+        ((None,  "high"), FAIL), ((None,  "low"), FAIL),
+    ]
+    for (hb, hc), expected in table:
+        r = _check_warning(warning(bold=hb, bold_confidence=hc))
+        assert r.status == expected, (
+            "header_simple_gate(header_bold=%r[%s]) -> %s, expected %s"
+            % (hb, hc, r.status, expected))
+
+
+def test_header_simple_gate_body_bold_is_note_only(monkeypatch):
+    # body bold never changes the verdict in any header cell; med/high observations are noted
+    monkeypatch.setattr(verification, "WARNING_BOLD_POLICY", "header_simple_gate")
+    noted = _check_warning(warning(bold=True, body_bold=True, body_bold_confidence="high"))
+    assert noted.status == PASS and "body" in noted.reason
+    assert _check_warning(warning(bold=False, body_bold=True,
+                                  body_bold_confidence="high")).status == REVIEW
+    assert _check_warning(warning(bold=None, body_bold=False,
+                                  body_bold_confidence="high")).status == FAIL
+
+
+# --- header_medium_gate policy (older gate, env-selectable): header gates at medium+ ------------
 
 def test_header_medium_gate_header_cells(monkeypatch):
     monkeypatch.setattr(verification, "WARNING_BOLD_POLICY", "header_medium_gate")
@@ -615,26 +662,30 @@ def test_header_medium_gate_body_bold_noted_on_reason(monkeypatch):
 # --- header_body_gate policy: header bold AND body-not-bold, both at HIGH confidence ------------
 # (the stricter two-rule gate; still env-selectable via WARNING_BOLD_POLICY=header_body_gate)
 
-def test_default_warning_bold_policy_is_header_medium_gate():
+def test_default_warning_bold_policy_is_note_null_review():
     # pins the SHIPPED default (review #8). Every policy test below monkeypatches the mode, so
     # without this nothing would catch a reverted config default. (Fails if the WARNING_BOLD_POLICY
     # env var is set in the test environment -- that is the intended signal that it is not the default.)
     # Default history: header_body_gate -> medium_pass_gate (2026-06-11, course-staff guidance) ->
-    # header_medium_gate (2026-06-11, product decision: body bold is tracked but never gates).
-    assert verification.WARNING_BOLD_POLICY == "header_medium_gate"
+    # header_medium_gate (2026-06-11, body bold demoted to a note) -> note -> header_simple_gate ->
+    # note_null_review (2026-06-12, per reviewer guidance that bold is not expected to be
+    # machine-verifiable from photos: a determinate observation never gates and is recorded on
+    # the reason; only an unreadable-header null goes to review; bold can never FAIL a label).
+    assert verification.WARNING_BOLD_POLICY == "note_null_review"
 
 
-def test_default_policy_body_bold_does_not_gate():
-    # BEHAVIORAL pin of the default (no monkeypatch): the distinguishing cell — a bold header at
-    # medium confidence with a HIGH-confidence bold body — PASSES under the shipped default
-    # (body bold is an observation, not a gate). Under either prior two-rule default
-    # (medium_pass_gate or header_body_gate) this exact input FAILED, so a quiet revert flips
-    # this verdict in a way the string-equality pin above alone would not surface.
-    gw = warning(bold=True, bold_confidence="medium",
-                 body_bold=True, body_bold_confidence="high")
-    r = _check_warning(gw)
-    assert r.status == PASS
-    assert "body" in r.reason          # the observation is tracked on the reason
+def test_default_policy_observation_never_gates_only_null_reviews():
+    # BEHAVIORAL pin of the default (no monkeypatch), one cell per observation value, with
+    # confidence set to values that gated under prior defaults -- proving confidence is ignored
+    # and a determinate observation never gates. A quiet config revert flips at least one of
+    # these verdicts in a way the string-equality pin above alone would not surface.
+    assert _check_warning(warning(bold=True, bold_confidence="low")).status == PASS
+    r_no = _check_warning(warning(bold=False, bold_confidence="high"))
+    assert r_no.status == PASS                    # was REVIEW/FAIL under every prior gate
+    assert "NOT bold" in r_no.reason              # the observation is recorded for the reviewer
+    r_null = _check_warning(warning(bold=None, bold_confidence="high"))
+    assert r_null.status == REVIEW                # unreadable header -> readability flag
+    assert "could not confirm" in r_null.reason
 
 
 def test_header_body_gate_pass_requires_both(monkeypatch):
@@ -1322,18 +1373,21 @@ def test_reframe_does_not_touch_caps_violation():
     assert gw.status == FAIL and "capital letters" in gw.reason
 
 
-def test_reframe_does_not_fire_on_adversarial_clean_bold_fail():
-    # source-of-truth guard: a not-bold warning on a CLEAN image keeps the genuine bold message
+def test_reframe_does_not_fire_on_adversarial_clean_bold_fail(monkeypatch):
+    # source-of-truth guard for the GATING modes (env-selectable; the "note" default never
+    # produces a bold FAIL): a not-bold warning on a CLEAN image keeps the genuine bold message
+    monkeypatch.setattr(verification, "WARNING_BOLD_POLICY", "header_medium_gate")
     extract = _spirits_with(field("Old Tom Distillery, KY"), None)
     extract["government_warning"] = warning(bold=False, bold_confidence="high")
     gw = next(f for f in verify_label_only(extract)["fields"] if f.field == "government_warning")
     assert gw.status == FAIL and "bold" in gw.reason            # genuine finding preserved
 
 
-def test_reframe_does_not_touch_header_not_bold_on_low_quality_image():
-    # review #1: a HIGH-confidence header-not-bold FAIL is a definite finding, not a readability
-    # problem -- it must keep its specific bold message even on a soft/glared photo (the reframer
-    # previously overwrote it with the generic "submit a clearer image" text).
+def test_reframe_does_not_touch_header_not_bold_on_low_quality_image(monkeypatch):
+    # review #1 (gating modes): a HIGH-confidence header-not-bold FAIL is a definite finding, not
+    # a readability problem -- it must keep its specific bold message even on a soft/glared photo
+    # (the reframer previously overwrote it with the generic "submit a clearer image" text).
+    monkeypatch.setattr(verification, "WARNING_BOLD_POLICY", "header_medium_gate")
     extract = _spirits_with(field("Old Tom Distillery, KY"), "glare and blur on the back label")
     extract["government_warning"] = warning(bold=False, bold_confidence="high")
     gw = next(f for f in verify_label_only(extract)["fields"] if f.field == "government_warning")
@@ -1357,9 +1411,10 @@ def test_reframe_does_not_touch_body_bold_violation_on_low_quality_image(monkeyp
     assert "could not verify required label information" not in gw.reason
 
 
-def test_default_gate_body_bold_passes_with_note_even_on_low_quality_image():
-    # the same input under the header_medium_gate DEFAULT: body bold is an observation, not a
-    # gate — the warning PASSES and the note survives (PASS results are never reframed).
+def test_default_policy_body_bold_passes_with_note_even_on_low_quality_image():
+    # the same input under the shipped note_null_review default: the determinate header
+    # observation passes and body bold is only a note — the warning PASSES and the note
+    # survives (PASS results are never reframed).
     extract = _spirits_with(field("Old Tom Distillery, KY"), "soft, low-resolution back label")
     extract["government_warning"] = warning(bold=True, bold_confidence="high",
                                             body_bold=True, body_bold_confidence="high")
@@ -1368,11 +1423,12 @@ def test_default_gate_body_bold_passes_with_note_even_on_low_quality_image():
     assert "body" in gw.reason.lower()
 
 
-def test_reframe_still_rewords_unverifiable_bold_on_low_quality_image():
-    # the flip side of review #1: a genuinely UNVERIFIABLE bold read (uncertain -> REVIEW) on a
-    # low-quality image IS still reframed to the photo message -- only confident violations are kept.
-    # (bold_confidence="low": under the medium_pass_gate default a MEDIUM-confidence bold-header
-    # read now PASSES, so "low" is what keeps this read genuinely unverifiable.)
+def test_reframe_still_rewords_unverifiable_bold_on_low_quality_image(monkeypatch):
+    # the flip side of review #1 (gating modes): a genuinely UNVERIFIABLE bold read (uncertain ->
+    # REVIEW) on a low-quality image IS still reframed to the photo message -- only confident
+    # violations are kept. (bold_confidence="low" keeps the read genuinely unverifiable under
+    # header_medium_gate, whose medium-confidence reads pass.)
+    monkeypatch.setattr(verification, "WARNING_BOLD_POLICY", "header_medium_gate")
     extract = _spirits_with(field("Old Tom Distillery, KY"), "glare obscures the small print")
     extract["government_warning"] = warning(bold=True, bold_confidence="low")
     gw = next(f for f in verify_label_only(extract)["fields"] if f.field == "government_warning")
