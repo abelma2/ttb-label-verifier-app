@@ -4,17 +4,14 @@ Regulatory text and rules are grounded in the TTB Beverage Alcohol Manuals (BAM)
   - Distilled Spirits: TTB P 5110.7  (Vol 2, 04/2007)
   - Wine:              TTB-G-2018-7  (Vol 1, 08/2018)
   - Malt Beverages:    TTB P 5130.3  (Vol 3, 07/2001)
-
-Tune the matching thresholds against a small labeled test set before trusting them.
 """
 import os
 
 # --- Government Health Warning Statement (27 CFR part 16; ABLA of 1988) -------
-# Verbatim text, confirmed IDENTICAL across all three BAMs:
-#   Spirits BAM Ch.1 §15 (p.1-17), Wine BAM Ch.1 §10 (p.1-14), Malt BAM Ch.1 §10 (p.1-11).
-# The wording check is an exact (case-insensitive) match, so this string must be exact.
-# Format rule (same cites): the words "GOVERNMENT WARNING" must appear in CAPITAL
-# letters AND bold; the remainder may NOT be bold; it must be one continuous paragraph.
+# Verbatim text, confirmed identical across all three BAMs (Spirits Ch.1 §15, Wine Ch.1
+# §10, Malt Ch.1 §10). The wording check is an exact match, so this string must be exact.
+# Format rule (same cites): "GOVERNMENT WARNING" must appear in CAPITAL letters AND bold;
+# the remainder may NOT be bold.
 GOVERNMENT_WARNING = (
     "GOVERNMENT WARNING: (1) According to the Surgeon General, women should not "
     "drink alcoholic beverages during pregnancy because of the risk of birth defects. "
@@ -25,92 +22,36 @@ GOVERNMENT_WARNING = (
 # The literal header that must be in caps + bold (used in reviewer-facing messages).
 GOVERNMENT_WARNING_HEADER = "GOVERNMENT WARNING"
 
-# The warning must match word-for-word. Because the vision model can misread small print,
-# a near-but-not-exact transcription (>= this similarity, 0-100) goes to "needs review" so
-# a human verifies against the label, instead of a hard fail. Nothing non-exact ever
-# auto-passes; only a large deviation fails outright.
+# A near-but-not-exact warning transcription (>= this similarity, 0-100) goes to
+# needs-review instead of a hard fail; nothing non-exact ever auto-passes.
 WARNING_WORDING_REVIEW_FLOOR = 90
 
-# Bold handling policy for the government warning. Modes:
-#   "supplement_gate" -- DEFAULT (since 2026-06-12): judges the bold OBSERVATION in the
-#                    extraction (which, when WARNING_SUPPLEMENT_MODEL below is enabled, is the
-#                    warning-checker's read -- merged in by extraction.py -- with the main
-#                    model's read kept as evidence): True -> PASS (observation noted); False ->
-#                    NEEDS REVIEW ("confirm against the label image"); null -> NEEDS REVIEW
-#                    ("could not confirm ..." -- reframed by the image-quality machinery).
-#                    Confidence is ignored; bold can NEVER fail a label; a main-vs-checker
-#                    disagreement is appended to the reason as evidence, never gated. Measured
-#                    basis: the focused gpt-4.1 warning read scored 100% verdict accuracy on
-#                    ground truth with zero nulls and perfect rerun stability (vs ~47% bold
-#                    accuracy and ~30% stability for the full-extraction read), making every
-#                    confidence-tier gate collapse to this one rule. With the supplement
-#                    disabled, this gate applies to the main model's noisier read (its best
-#                    gate too, but expect more bold reviews -- or select note_null_review
-#                    below for the lenient single-model behavior).
-#   "note_null_review" -- prior default (2026-06-12, env-selectable; reviewer guidance that bold
-#                    is not machine-verifiable from photos with a single VLM): a DETERMINATE
-#                    header_bold observation (True or False, any confidence) NEVER gates -- the
-#                    warning PASSES with the observation recorded on the reason. Only a NULL read
-#                    goes to needs-review, as a readability flag. Nothing about bold can FAIL.
-#                    Superseded when the bold-only supplement model proved reliable enough to
-#                    make a "not bold" observation worth a review row again.
-#   "header_simple_gate" -- prior default (2026-06-12, env-selectable): observation alone,
-#                    confidence ignored -- True -> PASS, False -> NEEDS REVIEW (human confirms),
-#                    null -> FAIL ("submit a clearer label image"). The strongest screening
-#                    variant short of the confidence gates; use it if bold catch-rate matters.
-#   "note"        -- earlier 2026-06-12 default (env-selectable): bold NEVER gates the verdict;
-#                    an otherwise-valid warning PASSES with the header/body bold observations
-#                    recorded on the reason. Chosen when bold reads proved unstable even at high
-#                    confidence; superseded the same day because a "not bold" observation was
-#                    judged worth a human look (review) rather than a buried pass-note.
-#   "header_medium_gate" -- the prior default (2026-06-11 -- 2026-06-12, env-selectable): only the
-#                    HEADER bold rule gates the verdict. PASS when header_bold True at MEDIUM-or-
-#                    high confidence (on top of wording + ALL-CAPS); FAIL only on a HIGH-confidence
-#                    header_bold False; anything else (null / low, or a medium-confidence
-#                    violation) -> needs-review. body_bold is TRACKED -- a med/high-confidence
-#                    bold-body observation is appended to the reason as a note (and always stays
-#                    in the raw extraction) -- but it never decides pass/review/fail. An all-bold-
-#                    body label with a bold header PASSES under this gate; the two-rule gates
-#                    below were added precisely because the old header-only gate auto-passed ~93%
-#                    of all-bold-body violations.
-#   "medium_pass_gate" -- the prior default (2026-06-11, per course-staff guidance that the bold
-#                    PASS gate need not demand high confidence). 27 CFR 16.22 has TWO visual rules:
-#                    "GOVERNMENT WARNING" must be bold, AND the remainder/body may NOT be bold.
-#                    PASS when header_bold True AND body_bold False, each at MEDIUM-or-high
-#                    confidence (on top of wording + ALL-CAPS). FAIL stays strict -- only a
-#                    HIGH-confidence violation of either rule fails (header_bold False+high, or
-#                    body_bold True+high); everything else (null, low, or a medium-confidence
-#                    violation) -> needs-review. The only relaxation vs header_body_gate is that
-#                    medium-confidence, both-rules-satisfied reads move from REVIEW to PASS (fewer
-#                    false reviews on clean labels); because FAIL is unchanged, it cannot auto-pass
-#                    any high-confidence violation header_body_gate catches. Known cost (see
-#                    BENCHMARK_NOTES.md): a medium-confidence MISREAD of a not-bold header as bold
-#                    now passes instead of going to review.
-#   "header_body_gate" -- the STRICTER prior default (kept selectable via the env var). Same two
-#                    rules, but PASS requires HIGH confidence on both fields; anything uncertain
-#                    (null / medium / low on either) goes to needs-REVIEW. header_bold True by
-#                    itself can never pass -- the body/remainder is checked too. The benchmark
-#                    series (BENCHMARK_NOTES.md) showed the old header-only gate auto-passed
-#                    ~93% of all-bold-body violations; both two-rule gates close that gap.
-#   "confidence_gate" -- older default. Header only: header_bold True + medium/high -> pass; False +
-#                    medium/high -> fail; null/low -> fail-closed. Does NOT check the body (all-bold
-#                    warnings auto-pass). Kept for comparison/benchmarking.
-#   "review"      -- an otherwise-valid warning always goes to needs-review for a human.
-#   "trust_model" -- judge from header_bold alone (True->pass, False->FAIL, None->review),
-#                    ignoring confidence. Not recommended.
-# See BENCHMARK_NOTES.md (dev-archive branch; kept locally for dev) for the bold
-# experiments behind these choices.
+# Bold handling policy for the government warning (implemented in
+# verification._check_warning; measured rationale in BENCHMARK_NOTES.md, dev-archive).
+#   "supplement_gate" -- DEFAULT: judges the merged bold observation (the warning
+#       supplement's read when enabled, else the main read): True -> pass, False ->
+#       review, null -> review. Confidence ignored; bold can never FAIL a label.
+# Legacy single-model modes, kept env-selectable for comparison:
+#   "note_null_review"   -- a determinate observation passes with a note; only null -> review.
+#   "header_simple_gate" -- True -> pass, False -> review, null -> FAIL (clearer image).
+#   "note"               -- bold never gates; observations recorded on the reason.
+#   "header_medium_gate" -- header only: True at medium+ conf -> pass, False at high -> FAIL,
+#                           else review. body_bold is a note.
+#   "medium_pass_gate"   -- two rules (header bold AND body NOT bold, 27 CFR 16.22): both at
+#                           medium+ conf -> pass; only a high-confidence violation FAILs.
+#   "header_body_gate"   -- same two rules, but PASS requires high confidence on both.
+#   "confidence_gate"    -- header only, fail-closed on null/low confidence.
+#   "review"             -- always hand an otherwise-valid warning to a human.
+#   "trust_model"        -- judge header_bold alone, ignoring confidence. Not recommended.
 WARNING_BOLD_POLICY = os.environ.get("WARNING_BOLD_POLICY", "supplement_gate")
 
 # --- Fuzzy-match thresholds (0-100) for text fields (brand, class/type) -------
 #   score >= FUZZY_PASS          -> pass
 #   FUZZY_REVIEW_FLOOR..PASS     -> needs review
 #   below FUZZY_REVIEW_FLOOR     -> fail
-# brand/class are scored with a containment-aware token_set_ratio against the UNION of the
-# application's {brand_name, fanciful_name} and {class_type, statement_of_composition}
-# (see verification._check_text / _candidates), so a more-verbose label read, or the model
-# tagging the fanciful name as the brand, still matches the legitimate value. A genuine
-# mismatch still scores well below the floor (the union does not mask wrong reads).
+# Brand/class are scored with a containment-aware token_set_ratio against the UNION of the
+# application's {brand_name, fanciful_name} / {class_type, statement_of_composition} --
+# see verification._check_text / _candidates.
 FUZZY_PASS = 95
 FUZZY_REVIEW_FLOOR = 85
 
@@ -120,89 +61,60 @@ FUZZY_REVIEW_FLOOR = 85
 NAME_ADDRESS_PASS = 90
 NAME_ADDRESS_REVIEW_FLOOR = 70
 
-# A high fuzzy score can still hide a 1-2 character difference in a SHORT identity field
-# (e.g. brand "JON'S" vs "JOHN'S" scores ~96 -> would auto-pass). When an otherwise-passing
-# brand/class read differs from the application by at most this many character edits (after
-# normalization, so case/whitespace/apostrophe differences are already 0), route it to review
-# instead of passing. A superset read (e.g. "Captain John's Spiced Rum" vs "Captain John's")
-# has a large edit distance and is NOT caught by this guard.
+# An otherwise-passing brand/class read that differs from the application by at most this
+# many character edits (a likely typo: "JON'S" vs "JOHN'S" scores ~96) is routed to review
+# instead of auto-passing. A superset read has a large edit distance and is unaffected.
 TEXT_NEAR_MISS_EDIT_DISTANCE = 2
 
 # --- ABV matching tolerance, in percentage points (label vs application) ------
-# NOTE: this is a *matching* tolerance (does the label agree with the application?),
-# not the regulatory label-vs-actual-product tolerance in the BAMs.
+# A *matching* tolerance (does the label agree with the application?), not the regulatory
+# label-vs-actual-product tolerance in the BAMs.
 ABV_PASS_TOLERANCE = 0.1     # within this -> pass
 ABV_REVIEW_TOLERANCE = 0.5   # within this -> needs review; beyond -> fail
 
 # --- ABV label-only regulatory checks (independent of the application) --------
-# US proof is by definition 2x ABV (27 CFR 5.65), so a proof that disagrees with the stated
-# ABV is an internally inconsistent label. Tolerance in proof points (allows rounding).
+# US proof is by definition 2x ABV (27 CFR 5.65). Tolerance in proof points (allows rounding).
 PROOF_ABV_TOLERANCE = 1.0
-# TTB prescribes the alcohol statement as "alcohol __% by volume" / "alc. __% by vol."
-# (27 CFR 4.36 / 5.65 / 7.65); the bare abbreviation "ABV" is not a prescribed form. Matched
-# as a whole word against the transcribed alcohol-content value, case-insensitively.
+# TTB prescribes "alcohol __% by volume" / "alc. __% by vol." (27 CFR 4.36 / 5.65 / 7.65);
+# the bare abbreviation "ABV" is not a prescribed form. Matched as a whole word.
 NONCOMPLIANT_ABV_NOTATIONS = ("abv",)
 
 # --- Net contents: unit-aware volume comparison (label vs application) --------
-# The net-contents check compares VOLUME, not just the printed string: "16.9 FL. OZ." and
-# "1 PINT 0.9 FL. OZ." are the same volume in a different unit/format. When both sides parse to a
-# volume within this FRACTIONAL tolerance of each other they are treated as the SAME volume and
-# routed to needs-review (the unit/format differs from the application — a human verifies the unit
-# and standard of fill), NOT auto-passed; a larger difference is a genuine mismatch -> fail. The
-# tolerance (2%) absorbs cross-unit rounding (e.g. a 30 mL miniature legally printed as "1 FL OZ",
-# 29.57 mL, ~1.4% off) while staying well below the gap between adjacent standard-of-fill sizes (the
-# closest, 355 mL vs 375 mL, is ~5.6% apart). Unparseable values fall back to the fuzzy string
-# compare. This is a *matching* tolerance, not the standard-of-fill table (which is NOT enforced).
+# Both sides parsing to the same volume within this fractional tolerance -> needs-review
+# (same volume, different unit/format -- a human verifies the unit and standard of fill),
+# never auto-pass; beyond it -> fail. 2% absorbs cross-unit rounding (a 30 mL miniature
+# legally printed "1 FL OZ" is ~1.4% off) while staying well below the gap between adjacent
+# standard-of-fill sizes (355 vs 375 mL is ~5.6%). The standard-of-fill table itself is
+# NOT enforced.
 NET_CONTENTS_VOLUME_TOLERANCE = 0.02
 
-# Low-confidence reads from the vision model are downgraded from pass to "needs review"
-# so a human double-checks them rather than the app trusting a shaky read.
+# Low-confidence reads are downgraded from pass to "needs review".
 ESCALATE_LOW_CONFIDENCE = True
 
 # --- Extraction / runtime ----------------------------------------------------
-# Vision model used for extraction. gpt-5.4-mini is the default, chosen by a 5x stability pass
-# (scripts/benchmarks/stability_benchmark.py; BENCHMARK_NOTES.md -- dev-archive branch). Under WARNING_BOLD_POLICY
-# "confidence_gate" it caught the NOT-BOLD adversarial (03_notbold) 5/5, passed compliant (01)
-# 5/5, failed title-case/reworded 5/5, AND passed the realistic baselines 14/15 -- whereas
-# gpt-4.1 (the prior default) caught 03_notbold but FALSE-FAILED every realistic baseline
-# (0/15: it reads their bold headers as not-bold). gpt-5.4-mini is also the fastest accurate
-# model (~4.2s/label). gpt-5.5 is the accuracy ceiling (same behavior, ~40% slower). Do NOT use
-# gpt-4o/-mini, gpt-4.1-mini, o4-mini, or gpt-5.4-nano as the default -- they mishandle the bold
-# gate. Override at runtime with the EXTRACTION_MODEL env var (handy for A/B testing).
+# Vision model for the main extraction, chosen by a 5x stability benchmark
+# (BENCHMARK_NOTES.md, dev-archive). Do NOT default to gpt-4o/-mini, gpt-4.1-mini, o4-mini,
+# or gpt-5.4-nano -- they mishandle the bold gate. Env-overridable for A/B testing.
 EXTRACTION_MODEL = os.environ.get("EXTRACTION_MODEL", "gpt-5.4-mini")
 
-# Supplementary WARNING-ONLY reader for the government warning -- verbatim text, header
-# caps, and the bold observations -- run IN PARALLEL with the main extraction (same images,
-# the same warning wording as the main prompt, nothing else) and merged into the
-# extraction's government_warning by extraction.py: the supplement's read becomes THE
-# warning the verifier judges (wording, caps, AND bold); the main model's read is kept
-# alongside as evidence (main_present / main_text / main_header_all_caps / main_header_bold
-# / main_body_bold). Why a second model: measured head-to-head on ground truth, the focused
-# gpt-4.1 warning read scored 100% full-verdict accuracy (60/60; bold observation 60/60;
-# transcription exact 81/81 across datasets) at ~1-2s per call, while the main
-# full-extraction read managed 70% verdicts, ~50% bold accuracy, and spuriously flagged
-# canonical wording; the adversarial reworded-warning fixture confirmed the supplement
-# TRANSCRIBES what is printed (59% similarity -> wording FAIL) rather than reciting the
-# federal text from memory. CROSS-FAMILY diversity is deliberate: a gpt-5.4-mini supplement
-# repeated the main model's own misreads. The call is non-blocking (always finished before
-# the ~5-9s main call in testing -- zero added latency; any failure falls back to the main
-# read with a note) and powers the absence cross-check: when the two readers disagree about
-# whether a warning exists at all, the verdict is a review, never a one-reader hard FAIL.
+# Warning-only second reader, run IN PARALLEL with the main extraction and merged by
+# extraction.py: its present/text/caps/bold read becomes THE warning the verifier judges;
+# the main model's read is kept alongside as main_* evidence. Cross-family on purpose (a
+# gpt-5.4-mini supplement repeated the main model's own misreads); measured at 100%
+# warning-verdict accuracy on ground truth vs 70% for the main full-extraction read
+# (BENCHMARK_NOTES.md). Non-blocking: any failure falls back to the main read with a note.
 # Set to "" to disable entirely (single-model behavior, no second API call).
 WARNING_SUPPLEMENT_MODEL = os.environ.get("WARNING_SUPPLEMENT_MODEL", "gpt-4.1")
 
 # Hard ceiling on a single extraction call so a hung request fails fast instead of
-# blocking the UI (the per-label target is ~5s; this is a safety bound, not the target).
+# blocking the UI.
 REQUEST_TIMEOUT_SECONDS = 30
 
-# Batch upload: max concurrent extraction calls. Each label is an independent,
-# I/O-bound API call, so a small thread pool keeps total time bounded by the API
-# rate limit rather than the file count.
+# Batch upload: max concurrent extraction calls.
 BATCH_MAX_WORKERS = 8
 
-# A batch bursts up to BATCH_MAX_WORKERS concurrent calls, which can trip the API rate
-# limit (HTTP 429) on lower account tiers. 429s come back immediately -- nothing hangs --
-# so a short in-code backoff retry does not undermine the REQUEST_TIMEOUT_SECONDS ceiling
-# the way SDK-level retries would (those re-issue timed-out requests; the client keeps
-# max_retries=0). Retried in extraction._create_with_fallbacks.
+# A batch bursts up to BATCH_MAX_WORKERS concurrent calls, which can trip HTTP 429 on lower
+# account tiers. 429s return immediately, so a short backoff retry (in
+# extraction._create_with_fallbacks) does not undermine the REQUEST_TIMEOUT_SECONDS ceiling
+# the way SDK-level retries would (the client keeps max_retries=0).
 RATE_LIMIT_MAX_RETRIES = int(os.environ.get("RATE_LIMIT_MAX_RETRIES", "2"))

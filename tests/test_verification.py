@@ -280,6 +280,26 @@ def test_net_contents_zero_volume_uses_volume_path_not_fuzzy():
     assert _check_net_contents(field("0 mL"), "0 L").status == REVIEW
 
 
+def test_parse_volume_nonparenthesized_dual_declaration_reconciles():
+    # "750 mL 25.4 FL. OZ." (a common real-label format, no parentheses) is ONE quantity
+    # restated in two units (750 vs ~751.2 mL agree within tolerance) -> reconciled to the
+    # metric read, NOT summed to ~1501 mL; order does not matter
+    assert abs(verification._parse_volume("750 mL 25.4 FL. OZ.") - 750.0) < 0.5
+    assert abs(verification._parse_volume("25.4 FL. OZ. 750 mL") - 750.0) < 0.5
+    # the parenthetical dual form is unchanged, and a genuine compound ("1 PINT 0.9 FL OZ",
+    # same-system parts that do NOT individually agree) still SUMS to ~500 mL
+    assert abs(verification._parse_volume("16.9 FL OZ (500 mL)") - 500.0) < 1.0
+    assert abs(verification._parse_volume("1 PINT 0.9 FL. OZ.") - 499.79) < 0.5
+
+
+def test_net_contents_nonparenthesized_dual_declaration_never_fails():
+    # regression: "750 mL 25.4 FL. OZ." vs application "750 mL" used to SUM to ~1501 mL and
+    # falsely FAIL; it is the same volume restated -> needs-review at worst, never FAIL
+    result = _check_net_contents(field("750 mL 25.4 FL. OZ."), "750 mL")
+    assert result.status in (PASS, REVIEW)
+    assert result.status == REVIEW  # same volume, different format -> a human verifies
+
+
 # --- name & address ----------------------------------------------------------
 
 def test_name_address_match():
@@ -576,13 +596,16 @@ def test_apply_warning_supplement_merges_and_keeps_main_as_evidence():
     main_gw = warning(text="GOVERNMENT WARNING: misread text", caps=None,
                       bold=False, bold_confidence="medium",
                       body_bold=True, body_bold_confidence="low")
+    main_gw["header_bold_basis"] = "same stroke weight as the body"
     supp = warning(bold=True, bold_confidence="high",
                    body_bold=False, body_bold_confidence="high")
+    supp["header_bold_basis"] = "visibly thicker strokes than the body"
     gw = _apply_warning_supplement({"government_warning": main_gw}, supp)["government_warning"]
     # the warning reader's read is now THE warning the verifier judges...
     assert gw["text"] == GOVERNMENT_WARNING and gw["present"] is True
     assert gw["header_all_caps"] is True
     assert gw["header_bold"] is True and gw["header_bold_confidence"] == "high"
+    assert gw["header_bold_basis"] == "visibly thicker strokes than the body"
     assert gw["body_bold"] is False
     assert gw["warning_observer"] == "supplement"
     # ...and the main model's original read is preserved as evidence
@@ -591,7 +614,21 @@ def test_apply_warning_supplement_merges_and_keeps_main_as_evidence():
     assert gw["main_header_all_caps"] is None
     assert gw["main_header_bold"] is False
     assert gw["main_header_bold_confidence"] == "medium"
+    assert gw["main_header_bold_basis"] == "same stroke weight as the body"
     assert gw["main_body_bold"] is True
+
+
+def test_apply_warning_supplement_is_idempotent():
+    # An already-merged read is returned untouched -- a second merge must not copy the
+    # supplement's values into the main_* evidence.
+    from extraction import _apply_warning_supplement
+    main_gw = warning(bold=False, bold_confidence="medium")
+    supp = warning(bold=True, bold_confidence="high")
+    extracted = _apply_warning_supplement({"government_warning": main_gw}, supp)
+    again = _apply_warning_supplement(extracted, warning(bold=None))["government_warning"]
+    assert again["main_header_bold"] is False     # evidence survives the second call
+    assert again["header_bold"] is True           # merged read unchanged
+    assert again["warning_observer"] == "supplement"
 
 
 def test_apply_warning_supplement_failure_marks_fallback():

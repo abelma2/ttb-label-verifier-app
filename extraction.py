@@ -2,16 +2,12 @@
 
 The model only ever sees the image -- never the expected application values -- so it
 can't simply echo back the answers we're checking against. It TRANSCRIBES and reports
-visual observations (e.g. whether the warning header is bold); it never judges
-compliance. The deterministic verifier (verification.py) does the judging.
+visual observations; the deterministic verifier (verification.py) does the judging.
 
-Field definitions are grounded in the TTB Beverage Alcohol Manuals (see config.py).
-
-The returned dict follows a fixed schema. Each field object is
-``{"present": bool, "value": str|null, "confidence": "high|medium|low"}`` which
-distinguishes "absent from the label" (present=false) from "present but unreadable"
-(present=true, value=null, confidence=low). ``_coerce`` guarantees the shape so the
-verifier never has to defend against missing/odd keys.
+Each field object is ``{"present": bool, "value": str|null, "confidence": "high|medium|low"}``,
+distinguishing "absent from the label" (present=false) from "present but unreadable"
+(present=true, value=null). ``_coerce`` guarantees the schema shape so the verifier
+never has to defend against missing/odd keys.
 """
 import base64
 import json
@@ -33,12 +29,9 @@ class ExtractionError(Exception):
     would surface as a confident (wrong) verdict rather than a read error."""
 
 
-# Scalar fields that share the plain {present, value, confidence} shape.
-# fanciful_name / statement_of_composition / sulfite_declaration are CONDITIONAL evidence fields
-# (extract-if-visible; the extractor stays blind to the application). They are captured as their own
-# fields so the conditional/application-relevant designation + disclosure evidence is no longer buried
-# in class_type / brand_name / additional_statements. They are NOT consumed by verify() (no verdict
-# change); vintage triggers the conditional wine appellation requirement.
+# Scalar fields sharing the plain {present, value, confidence} shape. fanciful_name /
+# statement_of_composition / sulfite_declaration are evidence-only (extract-if-visible,
+# not consumed by verify()); vintage triggers the conditional wine appellation check.
 _SCALAR_FIELDS = (
     "brand_name", "fanciful_name", "class_type", "statement_of_composition", "net_contents",
     "name_and_address", "country_of_origin", "appellation", "vintage", "sulfite_declaration",
@@ -183,10 +176,8 @@ def _get_client() -> OpenAI:
     """Lazily create the client so the API key can be set at app start-up."""
     global _client
     if _client is None:
-        # timeout makes a hung request fail fast instead of blocking the UI. max_retries=0 so
-        # REQUEST_TIMEOUT_SECONDS is a real ceiling: the SDK default (2 retries) would re-issue a
-        # timed-out request, turning the 30s bound into ~90s+. Our own _create_with_fallbacks
-        # already handles the param-rejection retries.
+        # max_retries=0 keeps REQUEST_TIMEOUT_SECONDS a real ceiling (SDK retries would
+        # re-issue a timed-out request); param-rejection retries live in _create_with_fallbacks
         _client = OpenAI(timeout=REQUEST_TIMEOUT_SECONDS, max_retries=0)  # reads OPENAI_API_KEY from env
     return _client
 
@@ -206,26 +197,27 @@ def _normalize_images(images, media_type):
     return out
 
 
-def _build_content(images, media_type="image/png", prompt=_PROMPT):
-    """Build the user-message content: the prompt followed by one block per image.
-
-    detail="high" so the small back-label text (government warning, net contents, address)
-    is rendered at full fidelity rather than the 512px low-res tile."""
-    content = [{"type": "text", "text": prompt}]
+def _image_blocks(images, media_type="image/png") -> list:
+    """Base64-encode the images into content blocks, once -- shared by the main and
+    supplement prompts. detail="high" so small back-label text is rendered at full
+    fidelity rather than the 512px low-res tile."""
+    blocks = []
     for img_bytes, mt in _normalize_images(images, media_type):
         b64 = base64.b64encode(img_bytes).decode("utf-8")
-        content.append({"type": "image_url",
-                        "image_url": {"url": f"data:{mt};base64,{b64}", "detail": "high"}})
-    return content
+        blocks.append({"type": "image_url",
+                       "image_url": {"url": f"data:{mt};base64,{b64}", "detail": "high"}})
+    return blocks
+
+
+def _build_content(images, media_type="image/png", prompt=_PROMPT):
+    """Build the user-message content: the prompt followed by one block per image."""
+    return [{"type": "text", "text": prompt}] + _image_blocks(images, media_type)
 
 
 # --- Structured Outputs schema ----------------------------------------------
-# Strict JSON Schema mirroring the extraction contract. Structured Outputs forces the model to
-# return EXACTLY this shape (every key present, correct types). IMPORTANT: this guarantees the
-# SHAPE of the response, NOT the correctness of any judgment inside it -- e.g. header_bold is
-# still only the model's visual opinion, which benchmarks show is unreliable on real labels
-# (see BENCHMARK_NOTES.md, dev-archive branch). _coerce() still runs afterward for value normalization, and
-# _parse_response() still guards against truncated/empty/invalid responses.
+# Strict JSON Schema mirroring the extraction contract: the API guarantees the response
+# SHAPE, not the correctness of any observation inside it. _coerce still normalizes values
+# and _parse_response still guards against truncated/empty/invalid responses.
 _CONF_ENUM = {"type": "string", "enum": ["high", "medium", "low"]}
 _SCALAR_FIELD_SCHEMA = {
     "type": "object", "additionalProperties": False,
@@ -283,14 +275,11 @@ _STRUCTURED_RF = {"type": "json_schema",
 _JSON_OBJECT_RF = {"type": "json_object"}   # fallback for models without Structured Outputs
 
 # --- Warning-only supplement (WARNING_SUPPLEMENT_MODEL) -----------------------
-# A second, cross-family model reads ONLY the government warning -- verbatim text, header
-# caps, and the bold observations -- in parallel with the main extraction. Same wording as
-# the government_warning section of _PROMPT, standalone, plus one clarification the
-# ground-truth runs motivated: on all-bold labels the comparative bold question ("thicker
-# than the body?") is literally answerable as "no" even though the header IS in bold type.
-# See config.WARNING_SUPPLEMENT_MODEL for the measured rationale (100% verdict accuracy on
-# ground truth; transcribes a reworded warning faithfully rather than reciting the federal
-# text from memory).
+# A second, cross-family model reads ONLY the government warning, in parallel with the main
+# extraction. Same wording as _PROMPT's government_warning section plus one deliberate,
+# load-bearing divergence -- the all-bold clarification (on all-bold labels the comparative
+# bold question is literally answerable "no" even though the header IS bold) -- do NOT
+# "fix" the prompts back into sync. Rationale: config.WARNING_SUPPLEMENT_MODEL.
 _WARNING_PROMPT = """You are a transcription assistant for U.S. TTB alcohol-beverage label \
 review. You are shown one OR MORE photos of a SINGLE alcohol beverage product. Find the \
 federal health warning statement (the government warning), wherever it appears across the \
@@ -329,16 +318,15 @@ capitalization, size, darkness, contrast, or expectation. If uncertain, use null
 Report what you SEE; do not judge compliance. If no government warning is visible anywhere \
 in the images, set present=false and null values."""
 
-# The supplement returns exactly the extraction contract's government_warning shape, so it
-# reuses that subschema for Structured Outputs and _coerce_warning for normalization.
+# The supplement returns the extraction contract's government_warning shape, so it reuses
+# that subschema and _coerce_warning.
 _WARNING_RF = {"type": "json_schema",
                "json_schema": {"name": "warning_check", "strict": True,
                                "schema": _EXTRACTION_SCHEMA["properties"]["government_warning"]}}
 
 # How long extract_fields waits for the supplement AFTER the main call returns. The
-# supplement (~1-2s) finished before the main call (~5-9s) in every measured run, so this
-# only bites when the supplement hangs -- and then we fall back to the main read rather
-# than stretch the request.
+# supplement is normally faster than the main call, so this only bites when it hangs --
+# and then we fall back to the main read rather than stretch the request.
 _SUPPLEMENT_WAIT_SECONDS = 10
 
 
@@ -365,14 +353,11 @@ def _model_params(model: str) -> dict:
 
 
 def _create_with_fallbacks(client, content, params):
-    """chat.completions.create with retries on known per-model param rejections: a model
-    without strict Structured Outputs -> json_object; a model that rejects
-    reasoning_effort='minimal' -> 'low'. Each retry adjusts one param (the API reports one
-    at a time), so the loop converges in a couple of attempts. Rate-limit errors (429 --
-    realistic when a batch bursts BATCH_MAX_WORKERS concurrent calls) get a short bounded
-    backoff: a 429 returns immediately, so sleeping and retrying does not undermine the
-    REQUEST_TIMEOUT_SECONDS ceiling the way SDK retries of timed-out requests would.
-    Any other error is re-raised."""
+    """chat.completions.create with retries on known per-model param rejections (no strict
+    Structured Outputs -> json_object; reasoning_effort 'minimal' rejected -> 'low'). Each
+    retry adjusts one param, so the loop converges in a couple of attempts. 429s get a
+    short bounded backoff (they return immediately, so this does not undermine the
+    REQUEST_TIMEOUT_SECONDS ceiling). Any other error is re-raised."""
     last = None
     rate_limit_tries = 0
     for _ in range(3 + RATE_LIMIT_MAX_RETRIES):
@@ -381,8 +366,7 @@ def _create_with_fallbacks(client, content, params):
                 messages=[{"role": "user", "content": content}], **params)
         except RateLimitError as exc:
             last = exc
-            # insufficient_quota is also an HTTP 429 (account out of credits / billing not
-            # enabled) but it is PERMANENT -- retrying just burns time, so raise immediately
+            # insufficient_quota is also an HTTP 429 but PERMANENT -- never retry it
             if _is_quota_error(exc) or rate_limit_tries >= RATE_LIMIT_MAX_RETRIES:
                 raise
             rate_limit_tries += 1
@@ -417,11 +401,10 @@ def _is_quota_error(exc) -> bool:
 
 def failure_kind(exc) -> str:
     """Coarse classification of an extraction failure so the UI can give accurate guidance
-    instead of blaming every error on the photo: 'auth' (API key missing/invalid), 'quota'
-    (account out of credits), 'rate_limit', 'timeout', 'connection', 'bad_response'
-    (unusable model reply), or 'unknown'. Timeout is checked before connection because
-    APITimeoutError subclasses APIConnectionError. The api_key string check catches the
-    OpenAIError the client constructor raises when no key is configured at all."""
+    instead of blaming every error on the photo: 'auth', 'quota' (out of credits),
+    'rate_limit', 'timeout', 'connection', 'bad_response', or 'unknown'. Timeout is checked
+    before connection because APITimeoutError subclasses APIConnectionError; the api_key
+    string check catches the client-constructor error when no key is configured at all."""
     if isinstance(exc, AuthenticationError):
         return "auth"
     if isinstance(exc, RateLimitError):
@@ -437,12 +420,14 @@ def failure_kind(exc) -> str:
     return "unknown"
 
 
-def _extract_warning_supplement(client, images, media_type) -> dict:
-    """Run the warning-only supplement read (verbatim text + caps + bold) and return the
-    coerced government_warning-shaped dict. Raises on any failure -- the caller treats
-    that as 'supplement unavailable'."""
-    content = _build_content(images, media_type, prompt=_WARNING_PROMPT)
+def _extract_warning_supplement(client, image_blocks) -> dict:
+    """Run the warning-only supplement read and return the coerced government_warning-shaped
+    dict. ``image_blocks`` is the already-encoded list shared with the main call. Raises on
+    any failure -- the caller treats that as 'supplement unavailable'."""
+    content = [{"type": "text", "text": _WARNING_PROMPT}] + image_blocks
     params = _model_params(WARNING_SUPPLEMENT_MODEL)
+    # patched AFTER _model_params: _create_with_fallbacks mutates this dict in place on
+    # its retries, so both patches survive the json_object / reasoning-effort fallbacks
     params["response_format"] = _WARNING_RF
     params["max_completion_tokens"] = 1000   # the warning block only, not the full schema
     payload = _parse_json_payload(_create_with_fallbacks(client, content, params))
@@ -450,16 +435,16 @@ def _extract_warning_supplement(client, images, media_type) -> dict:
 
 
 def _apply_warning_supplement(extracted: dict, supp: dict | None) -> dict:
-    """Merge the supplement's warning read into the extraction's government_warning.
-
-    With a successful supplement read, the supplement's fields (present, text, caps, bold)
-    become THE warning the verifier judges, and the main model's original read moves to
-    main_present / main_text / main_header_all_caps / main_header_bold / main_body_bold
-    as evidence (displayed, never gated). On a failed supplement (supp=None) the main read
-    stays in place and warning_observer records the fallback so the verifier can say so.
-    Pure function -- unit-testable without network."""
+    """Merge the supplement's warning read into the extraction's government_warning: the
+    supplement's fields become THE warning the verifier judges, and the main model's read
+    moves to the main_* keys as evidence. On a failed supplement (supp=None) the main read
+    stays in place; warning_observer records "supplement" vs "main-fallback". Mutates and
+    returns ``extracted``; the merge is not idempotent, so an already-merged read
+    (warning_observer set) is returned untouched."""
     gw = extracted.get("government_warning")
     if not isinstance(gw, dict):
+        return extracted
+    if gw.get("warning_observer") is not None:   # already merged -- keep the evidence intact
         return extracted
     if supp is None:
         gw["warning_observer"] = "main-fallback"
@@ -469,6 +454,7 @@ def _apply_warning_supplement(extracted: dict, supp: dict | None) -> dict:
     gw["main_header_all_caps"] = gw.get("header_all_caps")
     gw["main_header_bold"] = gw.get("header_bold")
     gw["main_header_bold_confidence"] = gw.get("header_bold_confidence")
+    gw["main_header_bold_basis"] = gw.get("header_bold_basis")
     gw["main_body_bold"] = gw.get("body_bold")
     gw["main_body_bold_confidence"] = gw.get("body_bold_confidence")
     gw.update(supp)
@@ -479,17 +465,16 @@ def _apply_warning_supplement(extracted: dict, supp: dict | None) -> dict:
 def extract_fields(images, media_type: str = "image/png") -> dict:
     """Return the structured label fields extracted from the image(s), coerced to schema.
 
-    ``images`` may be a single bytes object (one label image) or a list of bytes /
-    (bytes, media_type) tuples -- e.g. the front and back/"other" labels of the SAME
-    product, which the model reads together as one label.
+    ``images`` may be a single bytes object or a list of bytes / (bytes, media_type)
+    tuples -- e.g. the front and back labels of the SAME product, read together.
 
-    When WARNING_SUPPLEMENT_MODEL is set, a warning-only read (verbatim text + caps +
-    bold) by that model runs IN PARALLEL with the main extraction (the supplement is
-    faster, so total latency stays the main call's) and its read is merged in by
-    _apply_warning_supplement. A supplement failure NEVER fails the extraction -- the
-    main read is used with a fallback marker."""
+    When WARNING_SUPPLEMENT_MODEL is set, a warning-only read by that model runs IN
+    PARALLEL with the main extraction and is merged in by _apply_warning_supplement.
+    A supplement failure NEVER fails the extraction -- the main read is used with a
+    fallback marker."""
     client = _get_client()   # created before threading so both calls share one client
-    content = _build_content(images, media_type)
+    image_blocks = _image_blocks(images, media_type)   # encoded once, shared by both calls
+    content = [{"type": "text", "text": _PROMPT}] + image_blocks
     params = _model_params(EXTRACTION_MODEL)
 
     if not WARNING_SUPPLEMENT_MODEL:
@@ -497,7 +482,7 @@ def extract_fields(images, media_type: str = "image/png") -> dict:
 
     executor = ThreadPoolExecutor(max_workers=1)
     try:
-        supp_future = executor.submit(_extract_warning_supplement, client, images, media_type)
+        supp_future = executor.submit(_extract_warning_supplement, client, image_blocks)
         extracted = _parse_response(_create_with_fallbacks(client, content, params))
         try:
             supp = supp_future.result(timeout=_SUPPLEMENT_WAIT_SECONDS)
@@ -512,10 +497,9 @@ def extract_fields(images, media_type: str = "image/png") -> dict:
 
 
 def _parse_json_payload(response) -> dict:
-    """Response guard for the extraction call: raise ExtractionError on a truncated / empty /
-    invalid response, else return the decoded JSON. A bad response must NOT be silently
-    coerced into an 'all-absent' object -- that would surface as a confident wrong verdict
-    instead of a read error."""
+    """Decode the model response, raising ExtractionError on a truncated/empty/invalid one --
+    a bad response must NOT be silently coerced into an 'all-absent' object (that would
+    surface as a confident wrong verdict instead of a read error)."""
     choice = response.choices[0]
     if getattr(choice, "finish_reason", None) == "length":
         raise ExtractionError("the model response was cut off at the token limit")
@@ -534,8 +518,7 @@ def _parse_response(response) -> dict:
 
 
 # --- Defensive coercion ------------------------------------------------------
-# Normalize whatever the model returns into the exact schema with safe defaults so
-# the verifier can rely on the shape.
+# Normalize whatever the model returns into the exact schema with safe defaults.
 _CONF = {"high", "medium", "low"}
 
 
@@ -593,9 +576,8 @@ def _normalize_beverage_type(value) -> str:
 
 
 def _coerce_warning(gw) -> dict:
-    """Normalize a government_warning object (from the main extraction OR the warning
-    supplement -- both return the same shape). This warning-field key set + coercion
-    feeds verification._check_warning."""
+    """Normalize a government_warning object (the main extraction and the supplement
+    return the same shape); feeds verification._check_warning."""
     gw = gw if isinstance(gw, dict) else {}
     text = gw.get("text")
     if text is not None and not isinstance(text, str):

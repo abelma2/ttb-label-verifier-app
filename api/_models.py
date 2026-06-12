@@ -102,6 +102,7 @@ class GovernmentWarningField(BaseModel):
     main_header_all_caps: Optional[bool] = None
     main_header_bold: Optional[bool] = None
     main_header_bold_confidence: Optional[Confidence] = None
+    main_header_bold_basis: Optional[str] = None
     main_body_bold: Optional[bool] = None
     main_body_bold_confidence: Optional[Confidence] = None
 

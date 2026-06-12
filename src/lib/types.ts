@@ -85,6 +85,7 @@ export interface GovernmentWarningField {
   main_header_all_caps?: boolean | null;
   main_header_bold?: boolean | null;
   main_header_bold_confidence?: Confidence | null;
+  main_header_bold_basis?: string | null;
   main_body_bold?: boolean | null;
   main_body_bold_confidence?: Confidence | null;
 }

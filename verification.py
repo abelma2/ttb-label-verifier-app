@@ -49,10 +49,9 @@ class FieldResult:
     expected: str
     status: str
     reason: str
-    # Machine-readable cause of the verdict, set where downstream logic must branch on WHY
-    # (currently the government-warning checks: "absence" / "wording" / "caps" / "bold" /
-    # "low_confidence"). It is for programmatic branching, never on the user-facing
-    # reason string — reasons are display text and may be reworded freely.
+    # Machine-readable verdict cause for programmatic branching (currently the warning
+    # checks: "absence"/"wording"/"caps"/"bold"/"low_confidence"). The user-facing .reason
+    # is display text and may be reworded freely.
     cause: str | None = None
 
 
@@ -76,9 +75,8 @@ def _get(field_obj):
 
 
 def _escalate(result: FieldResult, confidence) -> FieldResult:
-    """Downgrade a PASS to needs-review when the read was low-confidence. The downgraded
-    result's cause is "low_confidence" (the checks all SUCCEEDED — the doubt is the read's
-    overall confidence), so cause-driven logic never mistakes it for a substantive finding."""
+    """Downgrade a PASS to needs-review on a low-confidence read. cause="low_confidence"
+    so cause-driven logic never mistakes it for a substantive finding."""
     if ESCALATE_LOW_CONFIDENCE and result.status == PASS and confidence == "low":
         return FieldResult(result.field, result.extracted, result.expected, REVIEW,
                            result.reason + " (low-confidence read — please verify)",
@@ -131,11 +129,9 @@ def _fuzzy_result(field_name, value, expected, score, pass_floor, review_floor) 
 
 
 def _missing_value(field_name, present, expected) -> FieldResult:
-    """Verdict for a matched field with no readable value: needs-review if the model says
-    it IS on the label (present-but-unreadable), fail only if the model reports it absent.
-    Keeps 'couldn't read it' distinct from 'not on the label'. Uses `present`, NOT
-    confidence: the model returns confidence='low' for absent fields too, so confidence
-    can't distinguish absent from unreadable."""
+    """Needs-review if the model says the field IS on the label but unreadable; fail only
+    if reported absent. Keyed on `present`, NOT confidence -- the model returns
+    confidence='low' for absent fields too."""
     label = field_name.replace("_", " ")
     if present:
         return FieldResult(field_name, "", expected or "", REVIEW,
@@ -151,16 +147,13 @@ def _check_text(field_name, field_obj, expected, *, pass_floor=FUZZY_PASS,
                 near_miss_review=False) -> FieldResult:
     """Fuzzy match for free-text fields (brand name, class/type).
 
-    `expected` may be a single application value OR a list of acceptable values (e.g.
-    the brand_name *or* the fanciful_name): the label read is scored against each and
-    the best match wins, so whichever legitimate name the model happened to transcribe
-    still matches. The extractor never sees these values — it stays blind; the union is
-    purely a verification-side decision.
+    `expected` may be one application value or a list of acceptable values (e.g. the
+    brand_name *or* the fanciful_name); the best match wins. The extractor never sees
+    these values — the union is purely a verification-side allowance.
 
-    `near_miss_review` adds an edit-distance guard for short identity fields: a fuzzy PASS
-    that still differs from the matched value by 1-2 characters (a likely typo, e.g.
-    "JON'S" vs "JOHN'S") is routed to review rather than auto-passing. A superset read has a
-    large edit distance and is unaffected; an exact (normalized) match has distance 0."""
+    `near_miss_review` routes a fuzzy PASS that still differs from the matched value by
+    1-2 character edits (a likely typo, e.g. "JON'S" vs "JOHN'S") to review; a superset
+    read has a large edit distance and is unaffected."""
     present, value, conf = _get(field_obj)
     candidates = [c for c in (expected if isinstance(expected, (list, tuple)) else [expected]) if c]
     if not candidates:
@@ -184,11 +177,9 @@ def _check_text(field_name, field_obj, expected, *, pass_floor=FUZZY_PASS,
 
 
 # --- net contents: unit-aware volume parsing --------------------------------
-# Physical unit -> millilitre conversions (module-local: fixed physical constants, not a tunable
-# knob; the tolerance that uses them lives in config.NET_CONTENTS_VOLUME_TOLERANCE). Each entry is
-# (regex, mL-per-unit). Ordered most-specific first ("ml"/"cl"/"dl" before bare "l", "fl oz" before
-# "oz"); each regex requires the number to immediately precede the unit, so two units never claim
-# the same number.
+# Physical unit -> millilitre conversions, ordered most-specific first ("ml" before bare
+# "l", "fl oz" before "oz"); each regex requires the number to immediately precede the
+# unit, so two units never claim the same number.
 _VOLUME_UNITS_ML = (
     (r"milliliters?|millilitres?|mls?", 1.0),
     (r"centiliters?|centilitres?|cl", 10.0),
@@ -206,14 +197,14 @@ _VOLUME_PART_RES = tuple(
 
 
 def _parse_volume(s):
-    """Parse a net-contents string to a volume in millilitres, or None if no recognized unit is
-    present. Sums a genuine COMPOUND quantity ("1 PINT 0.9 FL. OZ." -> 1 pint + 0.9 fl oz), but
-    treats a parenthetical or repeated RESTATEMENT of the same volume as ONE value, not a sum:
-      - a parenthetical is dropped before parsing ("16.9 FL OZ (500 mL)" -> 16.9 fl oz);
-      - identical (unit, value) pairs are de-duped ("750 mL 750 mL" -> 750), while a real compound
-        uses DIFFERENT units and still sums.
-    Commas are treated as thousands separators ("1,750 mL" -> 1750). A bare number or unknown unit
-    returns None so the caller falls back to the fuzzy string compare rather than guess."""
+    """Parse a net-contents string to millilitres, or None if no recognized unit. Sums a
+    genuine COMPOUND quantity ("1 PINT 0.9 FL. OZ.") but treats a RESTATEMENT as one value:
+    a parenthetical is dropped ("16.9 FL OZ (500 mL)" -> 16.9 fl oz), identical
+    (unit, value) pairs are de-duped, and a non-parenthesized dual declaration
+    ("750 mL 25.4 FL. OZ.") whose parts individually AGREE on the volume reconciles to one
+    value (a genuine compound's parts do not agree, so it still sums). Commas are thousands
+    separators. A bare number or unknown unit returns None so the caller falls back to the
+    fuzzy string compare."""
     if not s:
         return None
     text = re.sub(r"(?<=\d),(?=\d)", "", str(s).lower())     # join thousands separators
@@ -224,7 +215,13 @@ def _parse_volume(s):
                   for rx, factor in _VOLUME_PART_RES for m in rx.finditer(primary)}
     if not quantities:
         return None
-    return sum(factor * value for factor, value in quantities)
+    volumes = [factor * value for factor, value in quantities]
+    if len(volumes) > 1 and max(volumes) - min(volumes) <= NET_CONTENTS_VOLUME_TOLERANCE * max(volumes):
+        # all parts agree on ONE volume -> a dual declaration restated across units, not a
+        # compound: take one, preferring a metric part (duals are metric-exact, US-rounded)
+        metric = [f * v for f, v in quantities if f in (1.0, 10.0, 100.0, 1000.0)]
+        return metric[0] if metric else volumes[0]
+    return sum(volumes)
 
 
 def _fmt_ml(ml):
@@ -232,11 +229,10 @@ def _fmt_ml(ml):
 
 
 def _check_net_contents(field_obj, expected) -> FieldResult:
-    """Compare net contents by VOLUME, not just the printed string. After the exact/whitespace
-    match, parse both sides to millilitres: the SAME volume in a different unit/format (e.g.
-    "16.9 FL. OZ." vs "1 PINT 0.9 FL. OZ.") goes to needs-review (verify the unit / standard of
-    fill), NOT auto-pass; a materially different volume fails; an unparseable value falls back to
-    the fuzzy string compare. The standard-of-fill table (permitted sizes) is NOT enforced here."""
+    """Compare net contents by VOLUME, not just the printed string: the same parsed volume
+    in a different unit/format goes to needs-review (verify the unit / standard of fill),
+    NOT auto-pass; a materially different volume fails; an unparseable value falls back to
+    the fuzzy string compare. The standard-of-fill table is NOT enforced here."""
     present, value, conf = _get(field_obj)
     if not expected:
         if value:
@@ -261,33 +257,25 @@ def _check_net_contents(field_obj, expected) -> FieldResult:
     return _check_text("net_contents", field_obj, expected)
 
 
-# A name/address read that is a strict subset of the expected value scores ~100 under
-# token_set_ratio (containment), so an extraction that captured only the city/state and
-# DROPPED the producer/bottler/importer name would otherwise PASS. Require the read to cover
-# at least this fraction of the expected's significant tokens; a high-scoring but low-coverage
-# subset read is routed to needs-review instead of auto-passing. (Module-local, not config.py:
-# this is a guard mechanic, not a regulatory knob — promote it to config on request.)
+# A strict-subset read scores ~100 under token_set_ratio (containment), so a read that
+# captured only the city/state and DROPPED the producer name would otherwise PASS. Require
+# the read to cover at least this fraction of the expected's significant tokens.
 _NAME_ADDRESS_COVERAGE_FLOOR = 0.6
-# The standard bottler/producer RELATIONSHIP verbs ("Brewed & Bottled By", "Distilled &
-# Bottled By", "Produced and Bottled By", "Imported By", "Made and Bottled By"). The phrase
-# is the required relationship disclosure (27 CFR 4.35/5.66/7.66), NOT part of the producer
-# name/address, so it is (a) non-significant for the coverage + producer-token checks and
-# (b) stripped from the FRONT of the displayed/compared read (_without_relationship_prefix)
-# so the field shows just the name and address. (The relationship TYPE — bottled vs
-# imported — is a separate compliance check, not done here; the raw transcription in the
-# response's `extracted` block still carries the full statement as reviewer evidence.)
+# Bottler/producer relationship verbs ("Distilled & Bottled By", "Imported By", ...). The
+# phrase is the relationship disclosure (27 CFR 4.35/5.66/7.66), NOT part of the producer
+# name/address, so it is non-significant for the coverage check and stripped from the front
+# of the compared read (_without_relationship_prefix); the raw transcription still carries
+# the full statement as reviewer evidence.
 _RELATIONSHIP_VERBS = (
     "brewed", "bottled", "distilled", "produced", "manufactured",
     "packed", "blended", "vinted", "cellared", "imported", "made", "canned",
-    # 27 CFR 5.66(b) also lists "filled by" / "prepared by"; "distributed" is not a CFR
-    # phrase but is common on real labels ("Imported & Distributed By: ...").
+    # 27 CFR 5.66(b) also lists filled/prepared; "distributed" is common on real labels
     "filled", "prepared", "distributed",
 )
 _NAME_ADDRESS_STOPWORDS = frozenset({"by", "and", "the", "of", "for", *_RELATIONSHIP_VERBS})
 
-# One-or-more relationship verbs (optionally joined by ,/and/&) followed by "BY" and any
-# trailing separator — matched at the START of the read only, so a producer name that
-# legitimately contains one of these words mid-string is never touched.
+# One-or-more relationship verbs (optionally joined by ,/and/&) followed by "BY" — matched
+# at the START only, so a producer name containing one of these words mid-string is never touched.
 _RELATIONSHIP_PREFIX_RE = re.compile(
     r"^\s*(?:(?:" + "|".join(_RELATIONSHIP_VERBS) + r")\s*(?:,|and|&)?\s*)+by\b[\s:\-–—]*",
     re.IGNORECASE,
@@ -295,10 +283,9 @@ _RELATIONSHIP_PREFIX_RE = re.compile(
 
 
 def _without_relationship_prefix(field_obj):
-    """The name_and_address field object with a leading relationship phrase ("DISTILLED AND
-    BOTTLED BY:", "VINTED & BOTTLED BY") removed from .value. A read that is ONLY the phrase
-    keeps its original value, so a partial read still flows through the existing
-    missing/unreadable logic unchanged."""
+    """Strip a leading relationship phrase ("DISTILLED AND BOTTLED BY:") from .value. A read
+    that is ONLY the phrase keeps its original value, so a partial read still flows through
+    the missing/unreadable logic unchanged."""
     if isinstance(field_obj, dict) and isinstance(field_obj.get("value"), str):
         stripped = _RELATIONSHIP_PREFIX_RE.sub("", field_obj["value"]).strip()
         if stripped and stripped != field_obj["value"]:
@@ -314,12 +301,9 @@ def _significant_tokens(s) -> set:
 
 
 def _normalize_address(s) -> str:
-    """Name/address-specific normalization used ONLY for the match score: on top of _normalize
-    (casefold + apostrophes + whitespace), map '&' -> 'and' and drop punctuation (commas/colons/
-    periods) that otherwise sticks to tokens and makes token_set_ratio brittle ('Distillery,' !=
-    'Distillery'). The displayed strings are untouched by THIS normalization (the read shown is
-    the prefix-stripped value from _without_relationship_prefix; expected is the applicant's
-    raw value)."""
+    """Match-score-only normalization: on top of _normalize, map '&' -> 'and' and drop
+    punctuation that sticks to tokens and makes token_set_ratio brittle ('Distillery,' !=
+    'Distillery'). The displayed strings are untouched."""
     s = _normalize(s).replace("&", " and ")
     return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", s)).strip()
 
@@ -335,19 +319,13 @@ def _is_short_subset_address(value, expected) -> bool:
 
 
 def _check_name_address(field_obj, expected) -> FieldResult:
-    """Name & address vary in order/abbreviation/punctuation, so score with a forgiving subset
-    ratio over a punctuation-normalized form (_normalize_address: '&'->'and', commas/periods
-    dropped) so a comma-placement or relationship-prefix difference doesn't false-review an
-    otherwise-identical address. The coverage guard (_is_short_subset_address) keeps that from
-    being TOO forgiving: a short subset read that DROPPED a chunk (e.g. only the city/state — the
-    producer/bottler name is missing) is routed to needs-review, never an auto-pass.
+    """Name & address vary in order/abbreviation/punctuation, so score with a forgiving
+    subset ratio over _normalize_address; the coverage guard (_is_short_subset_address)
+    routes a short subset read (e.g. only the city/state) to needs-review, never auto-pass.
 
-    KNOWN GAP: a producer-name word SUBSTITUTION on a long address (e.g. 'Vintners' misread as
-    'Wineries') can still pass the fuzzy score. A token-level substitution guard was tried and
-    removed because it false-reviewed common formatting differences (full state name vs postal
-    abbreviation, an application ZIP the label omits, a dropped apostrophe) — see the xfail tests.
-    A future fix should flag only a genuine swap (a distinctive token present on both sides but
-    different), not any missing token, and tokenize over the same _normalize_address the score uses."""
+    KNOWN GAP: a producer-name word SUBSTITUTION on a long address (e.g. 'Vintners' misread
+    as 'Wineries') can still pass the fuzzy score; a token-level guard was tried and removed
+    for false-reviewing common formatting differences — see the xfail tests."""
     present, value, conf = _get(field_obj)
     if not expected:
         if value:
@@ -506,12 +484,10 @@ def _check_abv(field_obj, expected, beverage_type, class_obj) -> FieldResult:
 
 
 # --- appellation of origin (wine, conditionally mandatory) -------------------
-# A wine that names a grape varietal, carries a vintage date, or uses a semi-generic type
-# designation (among other triggers) must show an appellation of origin (27 CFR 4.25 / 4.34;
-# the TTB Wine checklist). Unlike the composition-triggered disclosures (sulfites, FD&C Yellow
-# #5...), these triggers ARE visible on the label, so they are checkable. Varietal detection
-# uses a common-varietal set; the full list is 27 CFR 4.91, so an uncertain case is routed to
-# review rather than hard-failed.
+# A wine naming a grape varietal, a vintage date, or a semi-generic type designation must
+# show an appellation of origin (27 CFR 4.25 / 4.34). Unlike the composition-triggered
+# disclosures, these triggers ARE visible on the label. _COMMON_VARIETALS is a subset (the
+# full list is 27 CFR 4.91), so an uncertain case routes to review rather than hard-failing.
 _COMMON_VARIETALS = {
     "chardonnay", "cabernet sauvignon", "cabernet franc", "merlot", "pinot noir", "pinot grigio",
     "pinot gris", "sauvignon blanc", "riesling", "zinfandel", "syrah", "shiraz", "malbec",
@@ -521,11 +497,9 @@ _COMMON_VARIETALS = {
     "carmenère", "gruner veltliner", "grüner veltliner", "torrontes", "torrontés",
 }
 
-# Semi-generic type designations (27 CFR 4.24(b)): when one of these is used as the class/type,
-# the Wine checklist (27 CFR 4.34) requires an appellation of origin to accompany it — e.g.
-# "California Burgundy", not a bare "Burgundy". These are region-derived names, distinct from the
-# grape varietals above. Matched on WORD BOUNDARIES (not the varietals' plain substring test) so
-# "port" does not fire on "Portland"/"porter" and "hock" does not fire on "shock".
+# Semi-generic type designations (27 CFR 4.24(b)) require an accompanying appellation —
+# "California Burgundy", not a bare "Burgundy". Matched on WORD BOUNDARIES (unlike the
+# varietals' substring test) so "port" does not fire on "Portland"/"porter".
 _SEMI_GENERIC_DESIGNATIONS = frozenset({
     "angelica", "burgundy", "claret", "chablis", "champagne", "chianti", "malaga", "marsala",
     "madeira", "moselle", "port", "rhine", "hock", "sauterne", "sauternes", "sherry", "tokay",
@@ -548,10 +522,9 @@ def _wine_requires_appellation(class_value, vintage_present):
     return False, ""
 
 
-# Country/state appellation terms that may be embedded in the class/type designation, e.g.
-# "American Moscato" or "California Red Wine" -- in which case the appellation requirement is
-# satisfied even if the model didn't break it into the appellation field. The full appellation
-# set (counties, AVAs) is larger; this covers the common country/state cases confirmable from text.
+# Country/state appellation terms that may be embedded in the class/type designation
+# ("American Moscato"), satisfying the requirement even when the model didn't break the
+# appellation into its own field. Counties/AVAs are out of scope here.
 _APPELLATION_TERMS = {
     "american", "alabama", "alaska", "arizona", "arkansas", "california", "colorado",
     "connecticut", "delaware", "florida", "georgia", "hawaii", "idaho", "illinois", "indiana",
@@ -606,12 +579,10 @@ def _check_appellation(beverage_type, class_obj, vintage_obj, appellation_obj) -
 
 # --- rules check (label vs fixed regulation) ---------------------------------
 
-# The canonical warning body (the statement after the "GOVERNMENT WARNING:" header).
-# Labels commonly print the body in all-caps, and the vision model sometimes returns the
-# body WITHOUT the header, so wording is matched on the body, case-insensitively.
-# Leading/wrapping quote characters are tolerated around the header: some labels print
-# '"GOVERNMENT WARNING:" (1) ...' with the header in quotation marks (e.g. the Half Batch
-# label family), and a quote in front of "GOVERNMENT" must not stop the header strip.
+# Wording is matched on the BODY (the statement after the "GOVERNMENT WARNING:" header),
+# case-insensitively: labels print the body in all-caps and the model sometimes drops the
+# header. The regex deliberately tolerates wrapping quote characters — some labels print
+# the header in quotation marks, and a quote must not stop the header strip.
 _WARNING_HEADER_RE = re.compile(
     r"^[\s\"'“”‘’]*government\s*warning\s*:?[\"'“”‘’]*\s*",
     re.IGNORECASE)
@@ -622,15 +593,11 @@ def _warning_body(text) -> str:
 
 
 def _wording_canon(s) -> str:
-    """Spacing/hyphenation-insensitive form for the WORDING comparison ONLY. Labels print
-    the warning justified (wide inter-word gaps), condensed (words nearly touching),
-    line-wrapped with hyphenation, and occasionally wrapped in quotation marks -- so
-    transcriptions carry merged words, split words, "PREG- NANCY" artifacts, and decorative
-    quotes that are TYPOGRAPHY, not wording. Strip ALL whitespace, dashes (incl. soft
-    hyphen), and quote characters on both sides; letters and the punctuation that is part
-    of the statement (commas, periods, parens, colons) must still match exactly. The
-    canonical body contains no dashes or quotes, so stripping them cannot mask a
-    substantive wording difference."""
+    """Spacing/hyphenation/quote-insensitive form for the WORDING comparison only: justified
+    gaps, merged words, line-break hyphens ("PREG- NANCY"), and decorative quotes are
+    TYPOGRAPHY, not wording. Letters and the statement's own punctuation must still match
+    exactly; the canonical body contains no dashes or quotes, so stripping them cannot mask
+    a substantive difference."""
     return re.sub(r"[\s\-–—­\"'“”‘’]+", "", _normalize(s))
 
 
@@ -638,27 +605,26 @@ _CANONICAL_WARNING_BODY = _warning_body(GOVERNMENT_WARNING)
 _CANONICAL_WARNING_BODY_CANON = _wording_canon(_CANONICAL_WARNING_BODY)
 
 
-def _check_warning(gw) -> FieldResult:
-    """Wording + the caps/bold header rule for the government warning, FAIL-CLOSED.
+def _body_bold_note(gw) -> str | None:
+    """The med/high-confidence bold-body observation, appended to the reason as a note by
+    the policies where body bold never gates. One wording for all of them."""
+    if gw.get("body_bold") is True and gw.get("body_bold_confidence") in ("medium", "high"):
+        return ("note: the warning body also reads as bold — recorded as an "
+                "observation only; body bold does not affect this verdict")
+    return None
 
-    Grounded in 27 CFR part 16 / the TTB checklists. Because labels often print the
-    warning in all-caps and the model sometimes returns the body without the
-    "GOVERNMENT WARNING:" header, we:
-      - match WORDING on the body (case-insensitive);
-      - judge header CAPS deterministically from the verbatim text when the header is
-        present, else fall back to the model's header_all_caps, with caps==False as a
-        fail backstop;
-      - require the "S" in Surgeon / "G" in General to be capitalized (all-caps is fine);
-      - handle BOLD per config.WARNING_BOLD_POLICY (default "supplement_gate": judge the
-        merged bold observation -- the warning reader's when WARNING_SUPPLEMENT_MODEL ran
-        (its read also supplies text/caps post-merge), else the main read marked as
-        fallback. True -> PASS, False -> needs review, null -> needs review; confidence
-        ignored; a main-vs-checker disagreement is noted as evidence, never gated. Bold can
-        never FAIL a label; the absence cross-check above turns a one-reader "no warning"
-        into a review when the other reader transcribed one. The inline comment at the
-        bold block documents all policies.)
-    Title case fails and an unverifiable bold read goes to review; a near-miss wording read
-    goes to needs-review; nothing non-exact ever auto-passes.
+
+def _check_warning(gw) -> FieldResult:
+    """Wording + the caps/bold header rule for the government warning (27 CFR part 16),
+    FAIL-CLOSED:
+      - WORDING is matched on the body, case-insensitively (near-miss -> review, else FAIL);
+      - header CAPS is judged from the verbatim text when the header is present, else from
+        the model's header_all_caps observation; an explicit False always fails;
+      - the "S" in Surgeon / "G" in General must be capitalized (all-caps is fine);
+      - BOLD is handled per config.WARNING_BOLD_POLICY (modes documented there; default
+        "supplement_gate": True -> pass, False -> review, null -> review, confidence
+        ignored — bold can never FAIL a label).
+    Nothing non-exact ever auto-passes.
     """
     gw = gw if isinstance(gw, dict) else {}
     present = bool(gw.get("present"))
@@ -666,12 +632,10 @@ def _check_warning(gw) -> FieldResult:
     caps = gw.get("header_all_caps")
 
     if not present or not text:
-        # Absence cross-check: after the warning-supplement merge, present/text here are the
-        # WARNING READER's call, so this branch means the warning reader found nothing. When
-        # the main read DID transcribe a warning, the absence is contested -- two readers
-        # disagree about whether the statement exists -- so route to a human instead of
-        # hard-failing on one reader's miss. Absence FAILs only when both readers found
-        # nothing (or the single reader, when the supplement is disabled / fell back).
+        # Absence cross-check: post-merge, present/text are the WARNING READER's call. When
+        # the main read DID transcribe a warning, the absence is contested -- route to a
+        # human instead of hard-failing on one reader's miss. Absence FAILs only when both
+        # readers (or the only reader) found nothing.
         if gw.get("warning_observer") == "supplement" and (gw.get("main_present")
                                                            or gw.get("main_text")):
             return FieldResult("government_warning", text or "", GOVERNMENT_WARNING, REVIEW,
@@ -684,23 +648,18 @@ def _check_warning(gw) -> FieldResult:
     body_canon = _wording_canon(_warning_body(text))
     if (body_canon != _CANONICAL_WARNING_BODY_CANON
             and not body_canon.startswith(_CANONICAL_WARNING_BODY_CANON)):
-        # Not exact (after the spacing/hyphenation-insensitive canon -- see _wording_canon:
-        # justified gaps, merged words, and line-break hyphens are typography, not wording).
-        # A read that STARTS with the complete exact statement and continues into ADJACENT
-        # label text (e.g. "CONTAINS SULFITES" printed right below the warning) is
-        # transcription scoping, not a wording deviation -- it falls through to caps/bold,
-        # and the full read is displayed on the field card so the reviewer sees the
-        # trailing text. One decimal in the score display: a tiny deviation (e.g. one
-        # missing statutory comma) rounds to "100% similar" at integer precision, which
-        # told the reviewer nothing differed.
+        # The startswith branch above: a read that begins with the complete exact statement
+        # and continues into ADJACENT label text (e.g. "CONTAINS SULFITES" printed below it)
+        # is transcription scoping, not a wording deviation -- it falls through to caps/bold.
+        # The score is shown with one decimal, capped below 100, so a tiny deviation never
+        # displays as "100% similar".
         score = fuzz.ratio(body_canon, _CANONICAL_WARNING_BODY_CANON)
         if score >= WARNING_WORDING_REVIEW_FLOOR:
             if gw.get("warning_observer") == "supplement":
                 # The warning reader's transcription is measured-exact, so a near-miss is
                 # evidence of a REAL label deviation, not a photo problem. The phrasing
                 # deliberately avoids _READABILITY_REASON_HINTS so the image-quality
-                # reframer cannot rewrite this into "submit a clearer image" -- that
-                # message hid the diagnosis precisely when it was most reliable.
+                # reframer cannot rewrite this into "submit a clearer image".
                 return FieldResult("government_warning", text, GOVERNMENT_WARNING, REVIEW,
                                    f"warning wording differs slightly from the required text "
                                    f"({min(score, 99.9):.1f}% similar) — likely a missing or "
@@ -714,12 +673,10 @@ def _check_warning(gw) -> FieldResult:
                            f"warning wording does not match the required text "
                            f"({score:.1f}% similar)", cause="wording")
 
-    # Header caps: deterministic from the verbatim text when the header is present there (so
-    # title case fails), else fall back to the model's header_all_caps observation, with an
-    # explicit caps==False as a backstop. NOTE: we tried *requiring* the literal header in
-    # `text`, but the model often omits it from the transcription even when it IS present
-    # (still reporting header_all_caps=true), which false-reviewed compliant labels -- so we
-    # trust the observation as a fallback rather than gate on the transcription quirk.
+    # Header caps: deterministic from the verbatim text when present (so title case fails),
+    # else the model's header_all_caps observation. Requiring the literal header in `text`
+    # was tried and false-reviewed compliant labels -- the model often omits it from the
+    # transcription while still reporting header_all_caps=true.
     m = re.search(r"government\s+warning", text, re.IGNORECASE)
     header_caps = text[m.start():m.end()].isupper() if m else caps
     if header_caps is False or caps is False:
@@ -738,49 +695,20 @@ def _check_warning(gw) -> FieldResult:
                                "the 'S' in Surgeon and 'G' in General must be capitalized",
                                cause="caps")
 
-    # Bold handling per config.WARNING_BOLD_POLICY (see config.py for the full description).
-    #   "supplement_gate" -> DEFAULT. Judges the merged observation (the warning reader's when
-    #                    the supplement ran): True -> PASS, False -> REVIEW, null -> REVIEW.
-    #                    Confidence ignored; disagreement noted, never gated; bold never FAILs.
-    #   "note_null_review" -> prior default (env-selectable). A determinate observation
-    #                    (True/False, any confidence) PASSES with the observation on the
-    #                    reason; only null -> REVIEW (header unreadable). Bold never FAILs.
-    #   "header_simple_gate" -> prior default (env-selectable). Observation only, confidence
-    #                    IGNORED: True -> PASS, False -> REVIEW, null -> FAIL ("submit a
-    #                    clearer label image"). body_bold is a note.
-    #   "note"            -> earlier default (env-selectable). Bold NEVER gates: an otherwise-valid
-    #                    warning PASSES with the header/body bold observations on the reason.
-    #   "header_medium_gate" -> prior default (env-selectable). Only the HEADER rule gates: PASS on
-    #                    header_bold True at MEDIUM-or-high confidence; FAIL only on header_bold
-    #                    False at HIGH confidence; review otherwise. body_bold is a note.
-    #   "medium_pass_gate" -> older default (env-selectable). Pass/Review/Fail on BOTH visual rules
-    #                    (27 CFR 16.22): the header must be bold AND the remainder/body must NOT be
-    #                    bold. The PASS gate accepts MEDIUM-or-high confidence; FAIL fires only on a
-    #                    HIGH-confidence violation. header_bold alone can never pass.
-    #   "header_body_gate" -> the stricter two-rule gate (env-selectable): same two rules, but PASS
-    #                    requires HIGH confidence on both fields; medium-confidence reads -> review.
-    #   "confidence_gate" -> fail-closed using header_bold + header_bold_confidence (header only);
-    #   "trust_model"     -> judge from header_bold alone (ignores confidence);
-    #   "note"            -> bold is telemetry only, never gates;
-    #   "review"          -> hand every otherwise-valid warning to a human.
-    # NOTE: the per-policy branches below intentionally repeat the PASS/_escalate + reason pattern.
-    # That duplication is kept on purpose -- an explicit, auditable branch per policy is preferred
-    # over a DRY dispatch for this regulatory logic. medium_pass_gate deliberately
-    # mirrors header_body_gate's structure rather than sharing a helper, so the two gates can be
-    # diffed line-by-line; a shared PASS/escalate helper remains a deferred future cleanup.
+    # Bold handling per config.WARNING_BOLD_POLICY -- the per-mode semantics are documented
+    # there. The branches below intentionally repeat the PASS/_escalate + reason pattern:
+    # an explicit, auditable branch per policy is preferred over a DRY dispatch for this
+    # regulatory logic.
     bold = gw.get("header_bold")
     bold_conf = gw.get("header_bold_confidence", "low")
     if WARNING_BOLD_POLICY == "supplement_gate":
-        # Judges the merged bold observation (the warning reader's when the supplement ran;
-        # extraction falls back to the main read and marks warning_observer on failure).
-        # Confidence is ignored -- measured to carry no signal. A main-vs-checker
-        # disagreement is appended as evidence, never arbitrated (the checker was right in
-        # 32 of 33 measured disagreements). Bold can never FAIL a label; the absence
-        # cross-check above is this gate's only influence on a FAIL path.
+        # Judges the merged observation (the warning reader's when the supplement ran).
+        # Confidence is ignored (measured to carry no signal); a main-vs-checker
+        # disagreement is appended as evidence, never arbitrated; bold can never FAIL.
         notes = []
-        if gw.get("body_bold") is True and gw.get("body_bold_confidence") in ("medium", "high"):
-            notes.append("note: the warning body also reads as bold — recorded as an "
-                         "observation only")
+        body_note = _body_bold_note(gw)
+        if body_note:
+            notes.append(body_note)
         observer = gw.get("warning_observer")
         if observer == "supplement":
             main_obs = gw.get("main_header_bold")
@@ -804,15 +732,10 @@ def _check_warning(gw) -> FieldResult:
                            f"header could not be read clearly from this image; please verify"
                            + suffix, cause="bold")
     if WARNING_BOLD_POLICY == "note_null_review":
-        # Reviewer guidance (2026-06-12): bold is not expected to be machine-verifiable from
-        # photos, so a determinate observation never gates -- it is recorded for the reviewer
-        # (the label image renders beside the verdicts). Only a null read -- the model could
-        # not see the header well enough to form ANY observation -- goes to review, as a
-        # readability flag ("could not confirm" lets the image-quality machinery reframe it).
-        body_note = ""
-        if gw.get("body_bold") is True and gw.get("body_bold_confidence") in ("medium", "high"):
-            body_note = (" (note: the warning body also reads as bold — recorded as an "
-                         "observation only)")
+        # A determinate observation never gates -- it is recorded for the reviewer; only a
+        # null read (no observation at all) goes to review, as a readability flag.
+        note = _body_bold_note(gw)
+        body_note = f" ({note})" if note else ""
         header_obs = {True: "header read as bold", False: "header read as NOT bold"}.get(bold)
         if header_obs is not None:
             result = FieldResult("government_warning", text, GOVERNMENT_WARNING, PASS,
@@ -825,17 +748,11 @@ def _check_warning(gw) -> FieldResult:
                            f"header could not be read clearly from this image; please verify"
                            + body_note, cause="bold")
     if WARNING_BOLD_POLICY == "header_simple_gate":
-        # Confidence is deliberately ignored: benchmarking showed the model's bold-confidence
-        # carries no signal (high-confidence reads flipped between identical runs). The verdict
-        # map follows the OBSERVED error direction -- the model under-calls bold, so a "yes" is
-        # high-precision (pass) while a "no" is the noisy direction (review, never auto-fail).
-        # A null is about the IMAGE, not the label: a mandatory feature could not be verified,
-        # so the submission fails with a request for a clearer photo ("could not verify" lets
-        # the image-quality machinery reframe it on flagged photos).
-        body_note = ""
-        if gw.get("body_bold") is True and gw.get("body_bold_confidence") in ("medium", "high"):
-            body_note = (" (note: the warning body also reads as bold — recorded as an "
-                         "observation only; body bold does not affect this verdict)")
+        # Confidence ignored (carries no signal). The model under-calls bold, so True is the
+        # high-precision direction (pass) and False the noisy one (review, never auto-fail);
+        # a null means a mandatory feature could not be verified from the IMAGE -> fail.
+        note = _body_bold_note(gw)
+        body_note = f" ({note})" if note else ""
         if bold is True:
             result = FieldResult("government_warning", text, GOVERNMENT_WARNING, PASS,
                                  "wording, capital letters, and bold header verified" + body_note,
@@ -851,14 +768,10 @@ def _check_warning(gw) -> FieldResult:
                            f"from this image; submit a clearer label image" + body_note,
                            cause="bold")
     if WARNING_BOLD_POLICY == "header_medium_gate":
-        # Only the HEADER rule gates the verdict. body_bold NEVER decides pass/review/fail --
-        # a med/high-confidence bold-body observation is appended to the reason as a note (and
-        # the raw extraction always carries it), so reviewers still see an all-bold body
-        # without it driving the verdict (explicit product decision, 2026-06-11).
-        body_note = ""
-        if gw.get("body_bold") is True and gw.get("body_bold_confidence") in ("medium", "high"):
-            body_note = (" (note: the warning body also reads as bold — recorded as an "
-                         "observation only; body bold does not affect this verdict)")
+        # Only the HEADER rule gates; a med/high-confidence bold body is appended as a
+        # note, never deciding the verdict.
+        note = _body_bold_note(gw)
+        body_note = f" ({note})" if note else ""
         if bold is False and bold_conf == "high":
             return FieldResult("government_warning", text, GOVERNMENT_WARNING, FAIL,
                                f"'{GOVERNMENT_WARNING_HEADER}' does not appear to be in bold"
@@ -872,9 +785,9 @@ def _check_warning(gw) -> FieldResult:
                            f"could not confirm '{GOVERNMENT_WARNING_HEADER}' is in bold with at "
                            f"least medium confidence — please verify" + body_note, cause="bold")
     if WARNING_BOLD_POLICY == "header_body_gate":
-        # 27 CFR 16.22 has TWO visual rules: "GOVERNMENT WARNING" must be bold, and the remainder
-        # may NOT be bold. Both must be confidently satisfied to PASS; a high-confidence violation
-        # of either FAILS; anything uncertain (null / medium / low on either field) -> REVIEW.
+        # 27 CFR 16.22 has TWO visual rules: the header must be bold AND the remainder may
+        # NOT be bold. Both confidently satisfied -> PASS; a high-confidence violation of
+        # either -> FAIL; anything uncertain -> REVIEW.
         body_bold = gw.get("body_bold")
         body_conf = gw.get("body_bold_confidence", "low")
         header_not_bold = bold is False and bold_conf == "high"
@@ -883,8 +796,7 @@ def _check_warning(gw) -> FieldResult:
         body_msg = ("the body of the warning appears to be in bold — the remainder of "
                     "the warning may not appear in bold type")
         if header_not_bold and body_is_bold:
-            # both visual rules violated at high confidence: report BOTH, so a reviewer doesn't
-            # "fix" only the header and resubmit a label whose body is still impermissibly bold.
+            # report BOTH violations so a reviewer doesn't "fix" only the header
             return FieldResult("government_warning", text, GOVERNMENT_WARNING, FAIL,
                                f"{header_msg}; and {body_msg}", cause="bold")
         if header_not_bold:
@@ -903,14 +815,8 @@ def _check_warning(gw) -> FieldResult:
                            f"(need '{GOVERNMENT_WARNING_HEADER}' bold AND the body NOT bold) — "
                            f"please verify", cause="bold")
     if WARNING_BOLD_POLICY == "medium_pass_gate":
-        # Same two-rule structure as header_body_gate, but the PASS gate accepts MEDIUM-or-high
-        # confidence instead of high-only. PASS when header_bold True AND body_bold False, each at
-        # medium/high confidence. FAIL is IDENTICAL to header_body_gate -- only a HIGH-confidence
-        # violation of either visual rule fails (header_bold False+high, or body_bold True+high).
-        # Everything else (null, low confidence, OR a medium-confidence violation such as
-        # header_bold False+medium / body_bold True+medium) -> REVIEW. Because the FAIL conditions
-        # are unchanged, no high-confidence violation that header_body_gate fails can pass here; the
-        # only behavioral delta is that medium-confidence, both-rules-satisfied reads move REVIEW->PASS.
+        # Same two rules as header_body_gate, but PASS accepts MEDIUM-or-high confidence;
+        # the FAIL conditions are identical (high-confidence violations only).
         body_bold = gw.get("body_bold")
         body_conf = gw.get("body_bold_confidence", "low")
         header_not_bold = bold is False and bold_conf == "high"
@@ -966,10 +872,8 @@ def _check_warning(gw) -> FieldResult:
                              "wording, capital letters, and bold header all verified", cause="bold")
         return _escalate(result, gw.get("confidence"))
     if WARNING_BOLD_POLICY == "note":
-        # Bold is telemetry, not a gate: surface the model's header AND body observations but
-        # never fail/review on them. Real-photo bold reads proved unstable even at high
-        # confidence (identical runs flipped FAIL<->PASS; two confirmed false "not bold" FAILs),
-        # so the observation is for the reviewer to confirm against the on-screen label image.
+        # Bold is telemetry, not a gate: surface the header and body observations for the
+        # reviewer to confirm against the on-screen label image.
         header_obs = {True: "header read as bold", False: "header read as NOT bold"}.get(
             gw.get("header_bold"), "header bold not determinable")
         body_obs = {True: "body read as bold — the remainder should NOT be bold",
@@ -1000,12 +904,9 @@ def _check_presence(field_name, field_obj) -> FieldResult:
 
 
 # --- image-quality-aware reframing -------------------------------------------
-# When the photo itself is the problem (soft/small/glare/angle/crop/low-res), a missing field,
-# an unreadable field, an unverifiable-bold read, or a near-miss wording read is a PHOTO problem
-# -- not proof the physical label is noncompliant. We KEEP the fail/review verdict (the required
-# info still couldn't be verified) but reword the reason so it doesn't accuse the label. Clean
-# images (no quality note -- e.g. the controlled adversarial set) are never reframed, so the
-# compliance logic there is unchanged.
+# When the photo itself is flagged low-quality, a missing/unreadable/unverifiable read is a
+# PHOTO problem, not proof the label is noncompliant: the fail/review verdict is KEPT but
+# the reason is reworded so it doesn't accuse the label. Clean images are never reframed.
 _IMAGE_QUALITY_TERMS = (
     "glar", "blur", "soft", "small", "tiny", "faint", "obscur", "crop", "cut off", "cut-off",
     "angle", "rotat", "curv", "reflect", "resolution", "low res", "low-res", "shadow", "unclear",
@@ -1013,15 +914,10 @@ _IMAGE_QUALITY_TERMS = (
 )
 _UNVERIFIABLE_REASON = ("could not verify required label information from this image; "
                         "submit a clearer label image")
-# reasons that mean "couldn't read it from this photo" (vs a definite, legible violation like
-# title case, clearly-wrong wording, or a HIGH-CONFIDENCE bold violation, which are NOT reframed).
-# NOTE: the confident bold-violation messages ("does not appear to be in bold" / "appears to be in
-# bold") are deliberately NOT listed here -- under the default header_medium_gate and both
-# two-rule gates (medium_pass_gate, header_body_gate) those only fire on a high-confidence
-# determination, so they are definite findings, not readability problems, and rewording them to
-# "submit a clearer image" would mislead the reviewer about the most important rule. The
-# genuinely-unverifiable bold outcomes still reframe via "could not confirm" / "could not verify
-# that" (the gates' REVIEW messages and confidence_gate's null/low fail-closed).
+# Reasons that mean "couldn't read it from this photo". Definite, legible findings -- title
+# case, clearly-wrong wording, and the gates' confident bold-violation messages ("does not
+# appear to be in bold") -- are deliberately NOT listed: rewording those to "submit a
+# clearer image" would mislead the reviewer about the most important rule.
 _READABILITY_REASON_HINTS = (
     "not found on the label", "could not be read", "appears present but", "is unreadable",
     "could not verify that", "could not confirm", "close but not an exact match",
@@ -1041,8 +937,7 @@ def _reframe_for_image_quality(results, image_quality_notes):
     out = []
     for r in results:
         if r.status in (FAIL, REVIEW) and any(h in r.reason for h in _READABILITY_REASON_HINTS):
-            # keep .cause: it is the stable programmatic channel precisely because the
-            # display reason gets reworded (here and by future copy edits)
+            # keep .cause -- the stable programmatic channel precisely because reasons get reworded
             out.append(FieldResult(r.field, r.extracted, r.expected, r.status,
                                    _UNVERIFIABLE_REASON, cause=r.cause))
         else:
