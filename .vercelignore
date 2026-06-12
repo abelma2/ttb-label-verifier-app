@@ -14,6 +14,8 @@ node_modules/
 # Secrets & local config (defense in depth — also gitignored)
 .secrets/
 .streamlit/
+.env
+.env.*        # incl. .env.example — the key comes from Vercel's dashboard, not a file
 
 # Test data, fixtures, harnesses, experiments, demo assets
 private/

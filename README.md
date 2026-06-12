@@ -109,13 +109,31 @@ vercel.json           Python function config (maxDuration)
 | `EXTRACTION_MODEL` | no | override the vision model (default `gpt-5.4-mini`, chosen by a 5× stability benchmark) |
 | `WARNING_BOLD_POLICY` | no | bold-gate policy for the government warning (default `medium_pass_gate`; set `header_body_gate` for the stricter high-confidence-only PASS gate; see `config.py`) |
 
-The FastAPI layer reads the key from the environment only (`os.environ`). Never commit
-secrets; on Vercel, set the key in the project's environment variables.
+The FastAPI layer reads the key from the environment only (`os.environ`). Locally, copy
+`.env.example` to `.env` (gitignored) and the dev servers load it for you; on Vercel, set
+the key in the project's environment variables. Never commit secrets.
 
 ## Local development
 
 Prerequisites: **Python ≥ 3.10** (the engine uses modern type syntax) and
 **Node ≥ 22.6** (`npm run test:web` uses Node's built-in TypeScript stripping).
+
+### Fastest path
+
+```bash
+cp .env.example .env     # then paste your OpenAI key into OPENAI_API_KEY
+npm run setup            # = pip install -r requirements-dev.txt && npm install
+npm run dev:all          # API on :8000 + frontend on :3000, in one terminal
+```
+
+Open http://localhost:3000. The one prerequisite the repo can't supply for you is an
+OpenAI **API platform** key (see [Environment variables](#environment-variables)); paste
+it into `.env` and you're running. Interactive API docs: http://localhost:8000/api/py/docs.
+
+### Manual (two terminals)
+
+If you'd rather run the servers separately — or pass the key via the environment instead
+of `.env`:
 
 ```bash
 pip install -r requirements-dev.txt
@@ -123,13 +141,14 @@ npm install
 
 # terminal 1 — API on :8000
 export OPENAI_API_KEY="sk-..."              # PowerShell: $env:OPENAI_API_KEY = "sk-..."
-npm run dev:api        # = uvicorn api.index:app --reload --port 8000
+npm run dev:api        # = uvicorn api.index:app --reload --port 8000 --env-file .env
 
 # terminal 2 — frontend on :3000 (proxies /api/py/* to :8000)
 npm run dev
 ```
 
-Open http://localhost:3000. Interactive API docs: http://localhost:8000/api/py/docs.
+`dev:api` loads `.env` via `--env-file`; an `OPENAI_API_KEY` already set in the
+environment takes precedence, so the `export` form above still works.
 
 **Tests** (pure, no network — the model call is mocked in the API tests):
 
