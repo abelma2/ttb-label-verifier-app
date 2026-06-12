@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type MouseEvent } from "react";
 import type { ApplicationData, VerifyResponse } from "@/lib/types";
 import { cleanApplication, verifyLabel, VerifyError } from "@/lib/api";
 import {
@@ -15,6 +15,12 @@ import ResultsView, { RESULTS_HEADING_ID } from "./ResultsView";
 import UploadSlot from "./UploadSlot";
 
 type Phase = "idle" | "verifying" | "done" | "error";
+
+/** Cancelling settles in microtasks, so the Cancel button relabels to "Start
+ *  over" within one frame — faster than the second click of a double-click.
+ *  Reset clicks inside this window are the tail of a Cancel double-click, not
+ *  an intent to wipe the images and the typed application values. */
+const CANCEL_CLICK_GRACE_MS = 600;
 
 const OVERALL_ANNOUNCEMENT: Record<string, string> = {
   pass: "no issues found",
@@ -49,6 +55,7 @@ export default function VerifierClient() {
   const [resultImages, setResultImages] = useState<{ url: string; alt: string }[]>([]);
   const resultsRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const cancelClickedAt = useRef(-Infinity);
   const prefillInputRef = useRef<HTMLInputElement>(null);
   const prefillSeq = useRef(0);
 
@@ -103,7 +110,18 @@ export default function VerifierClient() {
     app: appValues,
   });
 
-  async function handleVerify() {
+  /** The second click of a double-click that started on Cancel: the cancel
+   *  settles in microtasks, so the row re-renders — and reflows — before the
+   *  second click lands. It can hit "Start over" (wiping the images and the
+   *  typed form) or the re-enabled Verify button (restarting the read).
+   *  e.detail > 1 catches OS-recognized double-clicks even when the user's
+   *  configured double-click interval exceeds the time window. */
+  function isCancelClickTail(e: MouseEvent<HTMLButtonElement>): boolean {
+    return e.detail > 1 || performance.now() - cancelClickedAt.current < CANCEL_CLICK_GRACE_MS;
+  }
+
+  async function handleVerify(e: MouseEvent<HTMLButtonElement>) {
+    if (isCancelClickTail(e)) return;
     if (!front || verifying) return;
     const controller = new AbortController();
     abortRef.current = controller;
@@ -151,10 +169,12 @@ export default function VerifierClient() {
   /** Stop the in-flight verify only — leave the images and form intact (the
    *  button says "Cancel", not "Start over"). The verify catch sets phase idle. */
   function handleCancel() {
+    cancelClickedAt.current = performance.now();
     abortRef.current?.abort();
   }
 
-  function handleReset() {
+  function handleReset(e: MouseEvent<HTMLButtonElement>) {
+    if (isCancelClickTail(e)) return;
     abortRef.current?.abort();
     abortRef.current = null;
     prefillSeq.current++; // an in-flight parse must not resurrect the cleared prefill

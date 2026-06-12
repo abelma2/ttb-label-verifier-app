@@ -50,3 +50,5 @@ supporting_docs/
 # --- OS noise ------------------------------------------------------------------
 .DS_Store
 Thumbs.db
+# Excel owner-lock files (left behind while a workbook is open in Excel)
+**/~$*
