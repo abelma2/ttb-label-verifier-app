@@ -25,7 +25,7 @@ locally in three commands ([Quick start](#quick-start)) and try the bundled
 a thin FastAPI serverless function over a shared Python engine, deployed as one Vercel
 project.
 
-**Design rationale:** [APPROACH.md](APPROACH.md) — the approach, tools used, and
+**Design rationale:** [Austin-Belman-APPROACH.pdf](Austin-Belman-APPROACH.pdf) — the approach, tools used, and
 assumptions made, in three pages.
 
 ![Single-label verification results](.github/assets/single-label-results.jpg)
