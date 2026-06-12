@@ -86,15 +86,25 @@ if visible; set present=false if none. Capture it here even if related text also
 abv_percent = the alcohol-by-volume number only as a number, e.g. 45.0 (null if none printed); \
 proof = the proof number if printed, e.g. 90 (null otherwise).
 - net_contents: as printed, e.g. "750 mL", "12 FL OZ".
-- name_and_address: the bottler/producer/importer name and full address. Look across the ENTIRE \
-label for the relationship phrase (e.g. "BREWED & BOTTLED BY", "BOTTLED BY", "PRODUCED AND BOTTLED \
-BY", "DISTILLED BY", "IMPORTED BY"), the company name, and the city/state. These pieces may be \
-separated, stacked, curved, or printed in different parts of the same label -- combine them into \
-ONE verbatim value in reading order, e.g. "DISTILLED AND BOTTLED BY OLD TOM DISTILLERY, BARDSTOWN, \
-KY". If you can read the relationship phrase, the producer name, OR the city/state, set \
-present=true and transcribe what you can (use confidence "low" if only partial). Do not include \
-URLs, website text, net contents, alcohol content, government warning text, slogans, marketing \
-copy, trademark notices, barcode text, or unrelated statements in name_and_address.
+- name_and_address: the name-and-address statement of the party RESPONSIBLE for the product in \
+the U.S. -- for an IMPORTED product the importer statement (e.g. "IMPORTED BY: ABC IMPORTS INC. \
+MIAMI, FL"); for a domestic product the bottler/producer statement (e.g. "DISTILLED AND BOTTLED \
+BY OLD TOM DISTILLERY, BARDSTOWN, KY"). Look across the ENTIRE label for the relationship phrase \
+(e.g. "BREWED & BOTTLED BY", "BOTTLED BY", "PRODUCED AND BOTTLED BY", "DISTILLED BY", "IMPORTED \
+BY"), the company name, and the city/state. These pieces may be separated, stacked, curved, or \
+printed in different parts of the same label -- combine them into ONE verbatim value in reading \
+order. If the label shows MORE THAN ONE company statement, pick ONE for this field by this \
+priority: (1) a statement whose phrase contains "IMPORTED" (e.g. "IMPORTED BY: ...") ALWAYS \
+wins -- use it even when a producer/estate statement is larger, more prominent, or appears \
+first; (2) otherwise the statement with a bottling/production phrase (e.g. "BOTTLED BY", \
+"ESTATE BOTTLED BY", "PRODUCED AND BOTTLED BY"); (3) otherwise the bare company/address line. \
+Transcribe EVERY other company statement as its own additional_statements item (kind \
+"producer_statement") -- never merge two companies into this one field, and never drop a \
+company statement entirely. If you can read the \
+relationship phrase, the company name, OR the city/state, set present=true and transcribe what \
+you can (use confidence "low" if only partial). Do not include URLs, website text, net contents, \
+alcohol content, government warning text, slogans, marketing copy, trademark notices, barcode \
+text, or unrelated statements in name_and_address.
 - country_of_origin: the country-of-origin statement for imports, e.g. "PRODUCT OF SCOTLAND"; \
 present=false for domestic product with no such statement.
 - appellation: (WINE) the appellation of origin -- where the grapes were grown -- a country, \
@@ -136,7 +146,9 @@ verbatim if visible. Set present=false if none. Put it in THIS field -- do not b
 additional_statements.
 - additional_statements: array of any OTHER mandatory/disclosure text present that does NOT already \
 have its own field above, each transcribed verbatim, e.g. "CONTAINS FD&C YELLOW #5", an age or \
-commodity statement. Optional "kind" hint per item. Empty array if none.
+commodity statement, or a secondary producer/bottler/estate statement that is NOT the responsible \
+party's name_and_address (kind "producer_statement"). Optional "kind" hint per item. Empty array \
+if none.
 - image_quality_notes: a short note about any condition that hurt your reading (glare, shadow, \
 rotation, low resolution, cropping); null if the image is clean.
 

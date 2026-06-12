@@ -279,6 +279,9 @@ _NAME_ADDRESS_COVERAGE_FLOOR = 0.6
 _RELATIONSHIP_VERBS = (
     "brewed", "bottled", "distilled", "produced", "manufactured",
     "packed", "blended", "vinted", "cellared", "imported", "made", "canned",
+    # 27 CFR 5.66(b) also lists "filled by" / "prepared by"; "distributed" is not a CFR
+    # phrase but is common on real labels ("Imported & Distributed By: ...").
+    "filled", "prepared", "distributed",
 )
 _NAME_ADDRESS_STOPWORDS = frozenset({"by", "and", "the", "of", "for", *_RELATIONSHIP_VERBS})
 

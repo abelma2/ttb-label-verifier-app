@@ -382,6 +382,29 @@ def test_address_midstring_phrase_untouched():
     assert _without_relationship_prefix(field(untouched))["value"] == untouched
 
 
+def test_address_multiverb_import_prefix_stripped():
+    # real-world case: "Imported & Distributed By:" — "distributed" is not a CFR phrase but
+    # appears on real labels and must not block the leading strip
+    r = _without_relationship_prefix(
+        field("IMPORTED & DISTRIBUTED BY: TRI-VIN IMPORTS INC. 2 CLINTON PLACE, "
+              "NEW ROCHELLE, NY 10801, USA."))
+    assert r["value"] == "TRI-VIN IMPORTS INC. 2 CLINTON PLACE, NEW ROCHELLE, NY 10801, USA."
+
+
+def test_address_two_entity_import_statement_left_intact():
+    # DELIBERATE: a read carrying BOTH the foreign producer and the importer, joined by a
+    # mid-string "IMPORTED BY:", is left whole. The phrase is structure, not noise — it is
+    # what tells the reviewer which entity is the importer (TTB checklist: the importer's
+    # name/address must immediately follow "Imported by"), and deleting it would mash two
+    # companies together or hide the producer from the only place the read is displayed.
+    for read in [
+        "A. A. FONTANAVECCHIA DI LIBERO RILLO TORRECUSO (BN) - ITALY "
+        "IMPORTED BY: BUTA DISTRIBUTORS INC. DELRAY BEACH, FL, USA",
+        "V.A.M. snc - CANELLI (AT) - ITALY IMPORTED BY: BUTA DISTRIBUTORS INC. - BOCA RATON - (FL)",
+    ]:
+        assert _without_relationship_prefix(field(read))["value"] == read
+
+
 @pytest.mark.xfail(strict=True, reason="KNOWN GAP: a producer-name word substitution still passes "
                    "the fuzzy score. The token-level guard was removed (it false-reviewed common "
                    "formatting differences); see _check_name_address docstring.")
