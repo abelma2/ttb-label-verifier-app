@@ -19,6 +19,15 @@ const nextConfig: NextConfig = {
           : "/api/",
     },
   ],
+  // Dev-only: webpack's on-disk cache serializes packs into large contiguous
+  // ArrayBuffers, which fails on the 32-bit-Node dev machine once big modules
+  // (SheetJS) are in the dev chunks — "RangeError: Array buffer allocation
+  // failed" wedges every recompile. The in-memory cache skips serialization.
+  // Production builds (Vercel, 64-bit) are untouched (`dev` is false there).
+  webpack: (config, { dev }) => {
+    if (dev) config.cache = { type: "memory" };
+    return config;
+  },
 };
 
 export default nextConfig;

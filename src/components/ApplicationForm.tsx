@@ -21,7 +21,7 @@ const FIELDS: FieldDef[] = [
   {
     key: "name_and_address",
     label: "Name & address",
-    placeholder: "e.g. Distilled and Bottled by Old Tom Distillery, Bardstown, KY",
+    placeholder: "e.g. Old Tom Distillery, Bardstown, KY",
   },
   {
     key: "country_of_origin",

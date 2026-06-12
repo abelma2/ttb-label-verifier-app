@@ -5,8 +5,10 @@ applicant's submitted values and the federal labeling rules (TTB / 27 CFR). Uplo
 label image(s) — front and back together — optionally enter the application values, and
 each field comes back **pass**, **needs review**, or **fail** with a reason. A **batch
 mode** screens many labels at once: files pair into products by filename stem
-(`oldtom_front.jpg` + `oldtom_back.jpg`), an optional CSV/JSON application file matches
-rows to products, and results land in a worst-first table with per-product detail.
+(`oldtom_front.jpg` + `oldtom_back.jpg`; a single stitched image `oldtom.jpg` works the
+same), an optional Excel (`.xlsx`) application workbook matches rows to products — a
+ready-to-fill template with an instructions sheet is downloadable in the app — and
+results land in a worst-first table with per-product detail.
 
 **Production web app:** Next.js (App Router) frontend + a thin FastAPI serverless
 function, deployed as one Vercel project.
@@ -50,7 +52,8 @@ config.py             regulatory constants & tunable thresholds (env-overridable
 extraction.py         vision extraction -> fixed JSON schema
 verification.py       deterministic verification -> pass/needs_review/fail per field
 tests/                test_verification.py (engine) + test_api.py (the new API glue)
-examples/             a ready-to-use demo label (front + back images + application file)
+examples/             ready-to-use demo labels (images only — type application values
+                      manually, or start from the in-app Excel template)
 vercel.json           Python function config (maxDuration)
 .vercelignore         keeps all dev/test/tooling content out of deployments
 ```
@@ -61,7 +64,7 @@ vercel.json           Python function config (maxDuration)
 | --- | --- | --- |
 | `OPENAI_API_KEY` | yes | OpenAI **API platform** key (platform.openai.com, billing enabled — not a ChatGPT subscription) |
 | `EXTRACTION_MODEL` | no | override the vision model (default `gpt-5.4-mini`, chosen by a 5× stability benchmark) |
-| `WARNING_BOLD_POLICY` | no | bold-gate policy for the government warning (default `header_medium_gate` — header bold gates, body bold is a tracked note; set `medium_pass_gate` or `header_body_gate` for the stricter two-rule gates; see `config.py`) |
+| `WARNING_BOLD_POLICY` | no | bold handling for the government warning (default `note_null_review` — a determinate bold observation never gates and is recorded on the result; only an unreadable header goes to needs-review; bold can never fail a label. Gating modes remain selectable: `header_simple_gate`, `note`, `header_medium_gate`, `medium_pass_gate`, `header_body_gate`; see `config.py`) |
 
 The FastAPI layer reads the key from the environment only (`os.environ`). Locally, copy
 `.env.example` to `.env` (gitignored) and the dev servers load it for you; on Vercel, set
@@ -149,14 +152,15 @@ TTB's "Checklist of Mandatory Label Information" per class:
 
 - **Government warning** (27 CFR part 16) — exact wording; "GOVERNMENT WARNING" in caps
   **and bold**; "S"/"G" in Surgeon General capitalized. Wording and caps are judged
-  deterministically from the transcription; header bold is confidence-gated
-  (`header_medium_gate`): pass when the bold header is confirmed at medium-or-high
-  confidence, fail only on a high-confidence not-bold header, needs-review otherwise.
-  Font-weight detection from photos is unreliable (see `BENCHMARK_NOTES.md` on the
-  `dev-archive` branch), so a null/low-confidence bold read never auto-passes. The
-  body-not-bold observation is recorded and surfaced to the reviewer as a note but does
-  not affect the verdict. (The stricter two-rule gates that also judge the body remain
-  available: `WARNING_BOLD_POLICY=medium_pass_gate` or `header_body_gate`.)
+  deterministically from the transcription. Bold is **recorded, not gated**
+  (`note_null_review`, the default): repeated ground-truth runs showed font-weight reads
+  from photos are unstable at every confidence level, so a determinate observation
+  (bold or not bold) passes with the observation noted on the result for the reviewer —
+  who sees the label image beside the verdicts — and only an *unreadable* header (the
+  model could form no observation at all) goes to needs-review. Bold can never fail a
+  label. The body-bold observation is likewise recorded as a note. (Gating modes remain
+  selectable: `WARNING_BOLD_POLICY=header_simple_gate`, `note`, `header_medium_gate`,
+  `medium_pass_gate`, `header_body_gate`.)
 - **Alcohol content** — class-dependent presence; bare "ABV" notation fails (not a TTB
   form); a proof inconsistent with the stated ABV fails.
 - **Wine appellation** — conditionally mandatory when the label shows a varietal,
@@ -174,7 +178,8 @@ deliberately no automated pass/fail.
   one photo).
 - The vision model isn't perfectly deterministic; the warning check absorbs this (near
   misses go to review, never silent passes), and bold reads vary run to run — which is
-  why the gate fails closed.
+  why bold is surfaced as a recorded observation for visual confirmation rather than
+  driving the verdict.
 - This calls an external vision API; a production deployment inside TTB's network would
   need an on-prem or allowlisted model.
 

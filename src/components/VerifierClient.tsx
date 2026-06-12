@@ -3,8 +3,13 @@
 import { useEffect, useRef, useState } from "react";
 import type { ApplicationData, VerifyResponse } from "@/lib/types";
 import { cleanApplication, verifyLabel, VerifyError } from "@/lib/api";
-import { parseApplications, pickApplicationRow, type ParsedApplications } from "@/lib/applications";
+import {
+  parseApplicationsFile,
+  pickApplicationRow,
+  type ParsedApplications,
+} from "@/lib/applications";
 import { stem } from "@/lib/stem";
+import AppFileControls from "./AppFileControls";
 import ApplicationForm from "./ApplicationForm";
 import ResultsView, { RESULTS_HEADING_ID } from "./ResultsView";
 import UploadSlot from "./UploadSlot";
@@ -17,6 +22,16 @@ const OVERALL_ANNOUNCEMENT: Record<string, string> = {
   fail: "failed verification",
 };
 
+/** Status line under the spreadsheet buttons: green when a row loaded, amber
+ *  when something needs the user's attention, gray while reading. */
+type PrefillNote = { text: string; tone: "ok" | "warn" | "info" };
+
+const NOTE_TONE: Record<PrefillNote["tone"], string> = {
+  ok: "bg-pass-soft text-emerald-900",
+  warn: "bg-review-soft text-amber-900",
+  info: "bg-slate-100 text-slate-600",
+};
+
 export default function VerifierClient() {
   const [front, setFront] = useState<File | null>(null);
   const [back, setBack] = useState<File | null>(null);
@@ -26,7 +41,7 @@ export default function VerifierClient() {
   const [error, setError] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState("");
   const [prefill, setPrefill] = useState<{ name: string; parsed: ParsedApplications } | null>(null);
-  const [prefillMessage, setPrefillMessage] = useState<string | null>(null);
+  const [prefillMessage, setPrefillMessage] = useState<PrefillNote | null>(null);
   const [resultSig, setResultSig] = useState<string | null>(null);
   // snapshot of the files a shown verdict was computed from — the results
   // sidebar must keep showing THOSE images even if the upload slots change
@@ -49,7 +64,7 @@ export default function VerifierClient() {
     if (!prefill) return;
     const { mapping, error, warnings } = prefill.parsed;
     if (error) {
-      setPrefillMessage(`Could not use the application file (${error}).`);
+      setPrefillMessage({ text: `Couldn't use the spreadsheet (${error}).`, tone: "warn" });
       return;
     }
     const { row, message } = pickApplicationRow(mapping, frontStem);
@@ -57,7 +72,10 @@ export default function VerifierClient() {
       setApplication((prev) => ({ ...prev, ...row }));
     }
     const warningText = warnings.length > 0 ? ` ${warnings.join("; ")}.` : "";
-    setPrefillMessage(`Application file: ${message}.${warningText}`);
+    setPrefillMessage({
+      text: `Spreadsheet: ${message}.${warningText}`,
+      tone: row ? "ok" : "warn",
+    });
   }, [prefill, frontStem]);
 
   // Object URLs for the verified files (results sidebar), revoked on change/unmount.
@@ -140,6 +158,7 @@ export default function VerifierClient() {
   function handleReset() {
     abortRef.current?.abort();
     abortRef.current = null;
+    prefillSeq.current++; // an in-flight parse must not resurrect the cleared prefill
     setFront(null);
     setBack(null);
     setApplication({});
@@ -161,7 +180,8 @@ export default function VerifierClient() {
     if (!file) return;
     // last-write-wins: a slow parse of a since-replaced file must not win
     const seq = ++prefillSeq.current;
-    const parsed = parseApplications(await file.text(), file.name);
+    setPrefillMessage({ text: `Reading ${file.name}…`, tone: "info" });
+    const parsed = await parseApplicationsFile(file);
     if (seq === prefillSeq.current) setPrefill({ name: file.name, parsed });
   }
 
@@ -221,32 +241,45 @@ export default function VerifierClient() {
           </span>
         </div>
         <p className="mt-1 text-sm text-slate-500">
-          Type the values from the application to verify the label against them. Leave everything
-          blank to screen against the fixed federal rules only — the form is never auto-filled
-          from the label, so it stays an independent check.
+          Type the application&apos;s values into the form below, or load them from a
+          spreadsheet. Leave everything blank to check the label against the federal rules
+          only. The form is never filled in from the label itself, so the comparison stays
+          independent.
         </p>
-        <div className="mt-3">
-          <label htmlFor="single-app-file" className="block text-sm font-medium text-slate-700">
-            Prefill from application file{" "}
-            <span className="font-normal text-slate-400">(optional, CSV or JSON)</span>
-          </label>
-          <p className="mt-0.5 text-xs text-slate-500">
-            Same format as the batch application file; the row whose &apos;product&apos; value
-            matches the front image&apos;s filename stem is used.
+        <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+          <p className="text-sm font-semibold text-slate-800">
+            Have the application as a spreadsheet?
           </p>
-          <input
-            id="single-app-file"
-            ref={prefillInputRef}
-            type="file"
-            accept=".csv,.json"
+          <p className="mt-0.5 text-xs text-slate-500">
+            Load it and the row matching your label photo fills the form for you — every
+            field stays editable.
+          </p>
+          <AppFileControls
+            inputId="single-app-file"
+            inputRef={prefillInputRef}
             disabled={verifying}
-            onChange={(e) => {
-              handlePrefillFile(e.target.files?.[0] ?? null);
-              e.target.value = ""; // allow re-selecting the same (edited) file
-            }}
-            className="mt-1.5 block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-50 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-blue-700 hover:file:bg-blue-100"
-          />
-          {prefillMessage && <p className="mt-1.5 text-xs text-slate-600">{prefillMessage}</p>}
+            onFile={handlePrefillFile}
+          >
+            <li>
+              One row per product: in the <span className="font-semibold">product</span>{" "}
+              column, write the photo&apos;s file name without the ending — a row named{" "}
+              <span className="font-semibold">oldtom</span> matches oldtom.jpg as well as
+              oldtom_front.jpg + oldtom_back.jpg (capitals don&apos;t matter).
+            </li>
+            <li>If the file has only one row, that row is loaded automatically.</li>
+            <li>
+              It&apos;s the same workbook the Multiple labels tab uses — fill it once, use
+              it in both places.
+            </li>
+          </AppFileControls>
+          {prefillMessage && (
+            <p
+              role={prefillMessage.tone === "warn" ? "alert" : undefined}
+              className={`mt-2.5 rounded-lg px-3 py-2 text-sm ${NOTE_TONE[prefillMessage.tone]}`}
+            >
+              {prefillMessage.text}
+            </p>
+          )}
         </div>
         <div className="mt-4">
           <ApplicationForm values={application} disabled={verifying} onChange={setApplication} />

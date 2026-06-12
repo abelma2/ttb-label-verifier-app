@@ -5,9 +5,10 @@ import { MAX_IMAGES_PER_PRODUCT, VerifyError } from "@/lib/api";
 import {
   APP_FIELDS,
   appRowFor,
-  parseApplications,
+  parseApplicationsFile,
   type ParsedApplications,
 } from "@/lib/applications";
+import AppFileControls from "./AppFileControls";
 import { errorShort, runBatch, type BatchItem, type BatchProgress } from "@/lib/batch";
 import { ACCEPTED_IMAGE_TYPES } from "@/lib/image";
 import { groupUploads } from "@/lib/stem";
@@ -77,6 +78,7 @@ export default function BatchClient() {
   const [groupPairs, setGroupPairs] = useState(true);
   const [apps, setApps] = useState<ParsedApplications | null>(null);
   const [appFileName, setAppFileName] = useState<string | null>(null);
+  const [appFileReading, setAppFileReading] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
   const [progress, setProgress] = useState<BatchProgress | null>(null);
   const [items, setItems] = useState<BatchItem[] | null>(null);
@@ -141,9 +143,15 @@ export default function BatchClient() {
     // last-write-wins: a slow parse of a since-replaced file must not overwrite
     // the newer selection's mapping (the banner would then credit the wrong file).
     const seq = ++appFileSeq.current;
-    setAppFileName(file.name);
-    const parsed = parseApplications(await file.text(), file.name);
-    if (seq === appFileSeq.current) setApps(parsed);
+    setAppFileReading(file.name);
+    const parsed = await parseApplicationsFile(file);
+    if (seq === appFileSeq.current) {
+      // name and mapping commit together — the banner must never credit the
+      // new file's name with the previous file's data (or error)
+      setApps(parsed);
+      setAppFileName(file.name);
+      setAppFileReading(null);
+    }
   }
 
   async function handleScreen() {
@@ -189,11 +197,11 @@ export default function BatchClient() {
       if (abortRef.current !== controller) return;
       if (err instanceof VerifyError && err.kind === "cancelled") {
         setPhase("idle");
-        setAnnouncement("Batch screening cancelled.");
+        setAnnouncement("Screening cancelled.");
         return;
       }
       setPhase("idle");
-      setAnnouncement("Batch screening failed unexpectedly. Please try again.");
+      setAnnouncement("Screening failed unexpectedly. Please try again.");
     } finally {
       if (abortRef.current === controller) {
         abortRef.current = null;
@@ -212,9 +220,11 @@ export default function BatchClient() {
   function handleClear() {
     abortRef.current?.abort();
     abortRef.current = null; // close the same-tick window where a completing run resurrects state
+    appFileSeq.current++; // an in-flight parse must not resurrect the cleared mapping
     setFiles([]);
     setApps(null);
     setAppFileName(null);
+    setAppFileReading(null);
     setRejectedNote(null);
     setItems(null);
     setRunProducts([]);
@@ -268,7 +278,7 @@ export default function BatchClient() {
         className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
       >
         <h2 id="batch-upload-heading" className="text-base font-semibold text-slate-900">
-          Batch upload
+          Upload label photos
         </h2>
         <p className="mt-1 text-sm text-slate-500">
           Name each product&apos;s photos with the same beginning plus _front / _back —
@@ -359,56 +369,68 @@ export default function BatchClient() {
         </label>
 
         <div className="mt-5 border-t border-slate-100 pt-4">
-          <label htmlFor="batch-app-file" className="block text-sm font-medium text-slate-700">
-            Application data (optional, CSV or JSON)
-          </label>
-          <p className="mt-1 text-xs text-slate-500">
-            One row/entry per product; the <span className="font-semibold">product</span>{" "}
-            value must match the shared beginning of that product&apos;s file names
-            (capitalization ignored). Columns: <span className="font-semibold">product</span>{" "}
-            (required) plus any of {APP_FIELDS.join(", ")}.
+          <p className="text-sm font-semibold text-slate-800">
+            Application data <span className="font-normal text-slate-400">(optional)</span>
           </p>
-          <input
-            id="batch-app-file"
-            ref={appInputRef}
-            type="file"
-            accept=".csv,.json"
+          <p className="mt-0.5 text-xs text-slate-500">
+            One small spreadsheet checks every label against its application values — one
+            row per product.
+          </p>
+          <AppFileControls
+            inputId="batch-app-file"
+            inputRef={appInputRef}
             disabled={running}
-            onChange={(e) => {
-              onAppFile(e.target.files?.[0] ?? null);
-              e.target.value = ""; // allow re-selecting the same (edited) file
-            }}
-            className="mt-2 block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-50 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-blue-700 hover:file:bg-blue-100"
-          />
+            onFile={onAppFile}
+          >
+            <li>
+              In the <span className="font-semibold">product</span> column, write the
+              photos&apos; shared name without the ending — a row named{" "}
+              <span className="font-semibold">oldtom</span> matches oldtom.jpg as well as
+              oldtom_front.jpg + oldtom_back.jpg (capitals don&apos;t matter).
+            </li>
+            <li>
+              The other columns are {APP_FIELDS.join(", ")} — fill in what you have; blank
+              cells simply aren&apos;t checked.
+            </li>
+            <li>
+              Products without a matching row are screened against the federal rules only.
+            </li>
+          </AppFileControls>
+          {appFileReading && (
+            <p className="mt-2.5 rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-600">
+              Reading {appFileReading}…
+            </p>
+          )}
           {apps?.error && (
-            <p role="alert" className="mt-2 rounded-lg bg-review-soft px-3 py-2 text-sm text-amber-900">
-              Could not use the application file ({apps.error}) — all products will be
-              screened against the fixed rules only.
+            <p role="alert" className="mt-2.5 rounded-lg bg-review-soft px-3 py-2 text-sm text-amber-900">
+              Couldn&apos;t use the spreadsheet ({apps.error}) — all products will be
+              screened against the federal rules only.
             </p>
           )}
           {apps && !apps.error && (
-            <div className="mt-2 space-y-1">
+            <div className="mt-2.5 space-y-1.5">
               {apps.warnings.map((w, i) => (
                 <p key={i} className="rounded-lg bg-review-soft px-3 py-2 text-sm text-amber-900">
-                  Application file: {w}
+                  Spreadsheet: {w}
                 </p>
               ))}
-              <p className="text-xs text-slate-500">
-                Application data loaded for {Object.keys(apps.mapping).length} product(s)
+              <p className="rounded-lg bg-pass-soft px-3 py-2 text-sm text-emerald-900">
+                ✓ Loaded application data for {Object.keys(apps.mapping).length} product(s)
                 {appFileName && <> from {appFileName}</>}.{" "}
                 <button
                   type="button"
                   disabled={running}
                   onClick={() => {
+                    appFileSeq.current++; // an in-flight parse must not resurrect the removed file
                     setApps(null);
                     setAppFileName(null);
+                    setAppFileReading(null);
                     if (appInputRef.current) appInputRef.current.value = "";
                   }}
-                  className="font-medium text-blue-700 underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600"
+                  className="font-semibold underline underline-offset-2 hover:text-emerald-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600"
                 >
                   Remove file
-                </button>{" "}
-                (reverts to rules-only screening).
+                </button>
               </p>
             </div>
           )}
@@ -489,7 +511,7 @@ export default function BatchClient() {
           onClick={running ? handleCancel : handleClear}
           className="rounded-xl px-4 py-3 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-700"
         >
-          {running ? "Cancel" : "Clear batch"}
+          {running ? "Cancel" : "Clear all"}
         </button>
       </div>
 
@@ -504,7 +526,7 @@ export default function BatchClient() {
             aria-valuemin={0}
             aria-valuemax={progress.total}
             aria-valuenow={progress.done}
-            aria-label="Batch screening progress"
+            aria-label="Screening progress"
             className="h-2 w-full overflow-hidden rounded-full bg-slate-100"
           >
             <div
@@ -521,7 +543,7 @@ export default function BatchClient() {
 
       <div ref={resultsRef} className="scroll-mt-6">
         {!running && items && (
-          <section aria-label="Batch results" className="space-y-4">
+          <section aria-label="Screening results" className="space-y-4">
             {resultsSig !== currentSig && (
               <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
                 <span className="font-semibold">Inputs changed:</span> the results below are
@@ -549,7 +571,6 @@ export default function BatchClient() {
                     <th className="px-4 py-2.5 font-semibold">Product</th>
                     <th className="px-4 py-2.5 font-semibold">Files</th>
                     <th className="px-4 py-2.5 font-semibold">Result</th>
-                    <th className="px-4 py-2.5 font-semibold">Gov. warning</th>
                     <th className="px-4 py-2.5 font-semibold">Application data</th>
                     <th className="px-4 py-2.5 font-semibold">Flagged fields</th>
                   </tr>
@@ -558,9 +579,6 @@ export default function BatchClient() {
                   {ranked.map((i) => {
                     const item = items[i];
                     const isError = itemKey(item) === "error";
-                    const warn = item.result?.fields.find(
-                      (f) => f.field === "government_warning",
-                    );
                     const flags =
                       item.result?.fields
                         .filter((f) => f.status !== "pass")
@@ -571,9 +589,6 @@ export default function BatchClient() {
                         <td className="px-4 py-2">{item.fileNames.join(", ")}</td>
                         <td className="px-4 py-2">
                           {isError ? "Error" : STATUS_LABEL[item.result!.overall]}
-                        </td>
-                        <td className="px-4 py-2">
-                          {warn ? STATUS_LABEL[warn.status] : "—"}
                         </td>
                         <td className="px-4 py-2">{item.matched ? "matched" : "—"}</td>
                         <td className="px-4 py-2">

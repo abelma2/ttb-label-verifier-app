@@ -1,10 +1,11 @@
 /**
- * Unit tests for the batch helpers (stem, groupUploads, parseApplications,
- * appRowFor, pickApplicationRow) — originally TypeScript ports of the retired
- * Streamlit prototype's helpers (dev-archive branch); these tests pin the
- * documented behavior case for case.
+ * Unit tests for the batch helpers (stem, groupUploads, parseApplicationsFile,
+ * appRowFor, pickApplicationRow) — the row-matching semantics are TypeScript
+ * ports of the retired Streamlit prototype's helpers (dev-archive branch);
+ * these tests pin the documented behavior case for case. The application file
+ * is Excel-only, so the parse tests build real .xlsx workbooks in memory.
  *
- * Run: npm run test:web   (node --experimental-strip-types --test; no deps)
+ * Run: npm run test:web   (node --experimental-strip-types --test)
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -12,11 +13,38 @@ import assert from "node:assert/strict";
 import { stem, groupUploads } from "../stem.ts";
 import {
   appRowFor,
+  buildApplicationsTemplate,
   normHeader,
-  parseApplications,
-  parseCsv,
+  parseApplicationsFile,
   pickApplicationRow,
+  type AppRow,
 } from "../applications.ts";
+
+// SheetJS is CJS: under plain Node the exports may only be on `.default`.
+import * as XLSXmod from "xlsx";
+const XLSX = (
+  (XLSXmod as { default?: unknown }).default ?? XLSXmod
+) as typeof import("xlsx");
+
+/** Build an in-memory workbook File from [sheetName, rows[][]] pairs. */
+function wbFile(
+  sheets: [string, unknown[][]][],
+  filename = "apps.xlsx",
+  patch?: (wb: import("xlsx").WorkBook) => void,
+): File {
+  const wb = XLSX.utils.book_new();
+  for (const [name, aoa] of sheets) {
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), name);
+  }
+  patch?.(wb);
+  const bytes = XLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
+  return new File([bytes], filename);
+}
+
+/** Single-sheet shorthand. */
+function sheetFile(aoa: unknown[][], filename = "apps.xlsx"): File {
+  return wbFile([["Sheet1", aoa]], filename);
+}
 
 // --- stem ---------------------------------------------------------------------
 
@@ -48,6 +76,13 @@ test("stem keeps camera-style names distinct", () => {
   assert.equal(stem("IMG_1234.jpg"), "IMG_1234");
 });
 
+test("a stitched single image matches the same product as a front/back pair", () => {
+  // the application row 'oldtom' must match all three upload styles
+  assert.equal(stem("oldtom.jpg"), "oldtom");
+  assert.equal(stem("oldtom_front.jpg"), stem("oldtom.jpg"));
+  assert.equal(stem("oldtom_label.png"), stem("oldtom.jpg"));
+});
+
 // --- groupUploads ----------------------------------------------------------------
 
 const f = (name: string) => ({ name });
@@ -77,17 +112,7 @@ test("grouping off: each file its own product, label is still the stem", () => {
   );
 });
 
-// --- CSV parsing -------------------------------------------------------------------
-
-test("parseCsv handles quoted commas, escaped quotes, CRLF, blank lines", () => {
-  const grid = parseCsv('a,b\r\n"x, y","he said ""hi"""\n\n,\nlast,row\n');
-  assert.deepEqual(grid, [
-    ["a", "b"],
-    ["x, y", 'he said "hi"'],
-    ["", ""], // ",": two empty cells is NOT a blank line
-    ["last", "row"],
-  ]);
-});
+// --- header normalization ----------------------------------------------------------
 
 test("normHeader normalizes spacing, case, and dashes", () => {
   assert.equal(normHeader(" Brand Name "), "brand_name");
@@ -95,11 +120,14 @@ test("normHeader normalizes spacing, case, and dashes", () => {
   assert.equal(normHeader("NET   CONTENTS"), "net_contents");
 });
 
-// --- parseApplications: CSV ----------------------------------------------------------
+// --- parseApplicationsFile: happy paths --------------------------------------------
 
-test("CSV: normalized headers match, values trimmed, keyed by lowercase product", () => {
-  const csv = "Product,Brand Name,Net Contents\nOldTom, Old Tom Reserve , 750 mL \n";
-  const { mapping, error, warnings } = parseApplications(csv, "apps.csv");
+test("Excel: normalized headers match, values trimmed, keyed by lowercase product", async () => {
+  const file = sheetFile([
+    ["Product", "Brand Name", "Net Contents"],
+    ["OldTom", " Old Tom Reserve ", " 750 mL "],
+  ]);
+  const { mapping, error, warnings } = await parseApplicationsFile(file);
   assert.equal(error, null);
   assert.deepEqual(warnings, []);
   assert.equal(mapping.oldtom.brand_name, "Old Tom Reserve");
@@ -107,87 +135,166 @@ test("CSV: normalized headers match, values trimmed, keyed by lowercase product"
   assert.equal(mapping.oldtom.class_type, ""); // all six keys always present
 });
 
-test("CSV: duplicate products are last-row-wins and reported", () => {
-  const csv = "product,brand_name\na,First\na,Second\n";
-  const { mapping, warnings } = parseApplications(csv, "apps.csv");
+test("Excel: numeric and percent-formatted cells arrive as the text Excel shows", async () => {
+  const file = wbFile([
+    [
+      "Apps",
+      [
+        ["product", "alcohol_content", "net_contents"],
+        ["a", 0.45, 750],
+      ],
+    ],
+  ], "apps.xlsx", (wb) => {
+    wb.Sheets.Apps.B2.z = "0%"; // a percent-formatted ABV cell must read "45%", not "0.45"
+  });
+  const { mapping } = await parseApplicationsFile(file);
+  assert.equal(mapping.a.alcohol_content, "45%");
+  assert.equal(mapping.a.net_contents, "750");
+});
+
+test("Excel: duplicate products are last-row-wins and reported", async () => {
+  const file = sheetFile([
+    ["product", "brand_name"],
+    ["a", "First"],
+    ["a", "Second"],
+  ]);
+  const { mapping, warnings } = await parseApplicationsFile(file);
   assert.equal(mapping.a.brand_name, "Second");
   assert.ok(warnings.some((w) => w.includes("duplicate product row(s): a")));
 });
 
-test("CSV: no recognized field columns warns (rules-only screening)", () => {
-  const csv = "product,notes\na,hello\n";
-  const { mapping, error, warnings } = parseApplications(csv, "apps.csv");
+test("Excel: no recognized field columns warns (rules-only screening)", async () => {
+  const file = sheetFile([
+    ["product", "notes"],
+    ["a", "hello"],
+  ]);
+  const { mapping, error, warnings } = await parseApplicationsFile(file);
   assert.equal(error, null);
   assert.ok(mapping.a);
   assert.ok(warnings.some((w) => w.includes("no recognized application-field columns")));
 });
 
-test("CSV: rows without a product value are skipped; none at all is an error", () => {
-  const { error } = parseApplications("product,brand_name\n,NoProduct\n", "apps.csv");
+test("Excel: rows without a product value are skipped; none at all is an error", async () => {
+  const file = sheetFile([
+    ["product", "brand_name"],
+    ["", "NoProduct"],
+  ]);
+  const { error } = await parseApplicationsFile(file);
   assert.equal(error, "no rows with a 'product' value were found");
 });
 
-test("CSV: a UTF-8 BOM on the header row is tolerated", () => {
-  const { mapping } = parseApplications("﻿product,brand_name\na,X\n", "apps.csv");
+// --- parseApplicationsFile: sheet selection -----------------------------------------
+
+test("the first sheet WITH a 'product' column is read — instruction sheets are skipped", async () => {
+  const file = wbFile([
+    ["How to fill this in", [["Put your data on the next sheet"]]],
+    ["Applications", [["product", "brand_name"], ["a", "X"]]],
+  ]);
+  const { mapping, error, warnings } = await parseApplicationsFile(file);
+  assert.equal(error, null);
+  assert.deepEqual(warnings, []);
   assert.equal(mapping.a.brand_name, "X");
 });
 
-// --- parseApplications: JSON --------------------------------------------------------
-
-test("JSON mapping form: the mapping key beats an inner 'Product' field", () => {
-  const json = JSON.stringify({ realprod: { Product: "decoy", "Brand Name": "X" } });
-  const { mapping } = parseApplications(json, "apps.json");
-  assert.ok(mapping.realprod);
-  assert.equal(mapping.decoy, undefined);
-  assert.equal(mapping.realprod.brand_name, "X");
+test("a header-only decoy sheet does not shadow the real data sheet", async () => {
+  // e.g. a cleared/duplicated template sheet left in front of the real one
+  const file = wbFile([
+    ["Archive", [["product", "brand_name"]]],
+    ["Applications", [["product", "brand_name"], ["a", "X"]]],
+  ]);
+  const { mapping, error, warnings } = await parseApplicationsFile(file);
+  assert.equal(error, null);
+  assert.equal(mapping.a.brand_name, "X");
+  assert.ok(warnings.some((w) => w.includes("more than one sheet") && w.includes("'Applications'")));
 });
 
-test("JSON list and {products: [...]} forms both work", () => {
-  const list = JSON.stringify([{ product: "a", brand_name: "X" }]);
-  assert.equal(parseApplications(list, "apps.json").mapping.a.brand_name, "X");
-  const wrapped = JSON.stringify({ products: [{ product: "b", brand_name: "Y" }] });
-  assert.equal(parseApplications(wrapped, "apps.json").mapping.b.brand_name, "Y");
+test("two data-bearing sheets: first wins, with a warning naming it", async () => {
+  const file = wbFile([
+    ["First", [["product", "brand_name"], ["a", "X"]]],
+    ["Second", [["product", "brand_name"], ["b", "Y"]]],
+  ]);
+  const { mapping, warnings } = await parseApplicationsFile(file);
+  assert.ok(mapping.a);
+  assert.equal(mapping.b, undefined);
+  assert.ok(warnings.some((w) => w.includes("more than one sheet") && w.includes("'First'")));
 });
 
-test("JSON: a scalar document is a clear error, not a crash", () => {
-  const { error } = parseApplications('"just a string"', "apps.json");
-  assert.equal(error, "JSON must be a mapping of product -> fields, or a list of objects");
+test("no sheet with a 'product' column is a clear error", async () => {
+  const file = sheetFile([
+    ["name", "brand_name"],
+    ["a", "X"],
+  ]);
+  const { error } = await parseApplicationsFile(file);
+  assert.ok(error?.includes("no sheet has a 'product' column"));
 });
 
-test("JSON: invalid JSON reports the friendly read error", () => {
-  const { error } = parseApplications("{not json", "apps.json");
-  assert.equal(error, "the JSON file could not be read — it isn't valid JSON");
+// --- parseApplicationsFile: rejected inputs -----------------------------------------
+
+test("non-Excel extensions (the retired CSV/JSON formats) get the Excel-only error", async () => {
+  for (const name of ["apps.csv", "apps.json", "apps.txt"]) {
+    const { error } = await parseApplicationsFile(new File(["product,brand\na,X"], name));
+    assert.ok(error?.includes("only Excel files are accepted"), `${name}: ${error}`);
+  }
+});
+
+test("a corrupt .xlsx reports a read error, not a crash", async () => {
+  // a broken ZIP container (the real "corrupt download" case)
+  const corrupt = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 9, 9, 9, 9, 9, 9]);
+  const { error } = await parseApplicationsFile(new File([corrupt], "apps.xlsx"));
+  assert.ok(error?.includes("could not be read as an Excel workbook"));
+  // SheetJS reads plain text renamed to .xlsx as a one-column sheet — that must
+  // surface the layout error, never a crash or a silent empty mapping
+  const renamed = await parseApplicationsFile(
+    new File(["just some prose, no table here"], "apps.xlsx"),
+  );
+  assert.ok(renamed.error?.includes("no sheet has a 'product' column"));
+});
+
+test("an oversized file is rejected before parsing", async () => {
+  const big = new File([new Uint8Array(10 * 1024 * 1024 + 1)], "big.xlsx");
+  const { error } = await parseApplicationsFile(big);
+  assert.ok(error?.includes("over 10 MB"));
 });
 
 // --- appRowFor / pickApplicationRow ----------------------------------------------------
 
-test("appRowFor: a present-but-blank row screens rules-only (null)", () => {
-  const { mapping } = parseApplications("product,brand_name\na,\n", "apps.csv");
+test("appRowFor: a present-but-blank row screens rules-only (null)", async () => {
+  const { mapping } = await parseApplicationsFile(
+    sheetFile([["product", "brand_name"], ["a", ""]]),
+  );
   assert.equal(appRowFor(mapping, "a"), null);
   assert.equal(appRowFor(mapping, "missing"), null);
 });
 
-test("appRowFor: matching ignores capitalization", () => {
-  const { mapping } = parseApplications("product,brand_name\nOldTom,X\n", "apps.csv");
+test("appRowFor: matching ignores capitalization", async () => {
+  const { mapping } = await parseApplicationsFile(
+    sheetFile([["product", "brand_name"], ["OldTom", "X"]]),
+  );
   assert.ok(appRowFor(mapping, "OLDTOM"));
 });
 
 // --- review-fix regressions -----------------------------------------------------
 
-test("products named after Object.prototype members don't hit the prototype chain", () => {
+test("products named after Object.prototype members don't hit the prototype chain", async () => {
   // no application file at all: 'constructor' must NOT read as a present row
   assert.equal(appRowFor({}, "constructor"), null);
   assert.equal(pickApplicationRow({}, "constructor").row, null);
   // first row named 'Constructor' must not be falsely reported as a duplicate
-  const { mapping, warnings } = parseApplications(
-    "product,brand_name\nConstructor,X\n", "apps.csv");
+  const { mapping, warnings } = await parseApplicationsFile(
+    sheetFile([["product", "brand_name"], ["Constructor", "X"]]),
+  );
   assert.equal(warnings.length, 0);
   assert.ok(appRowFor(mapping, "constructor"));
 });
 
-test("a product named __proto__ is stored as a real row, not prototype pollution", () => {
-  const { mapping } = parseApplications(
-    "product,brand_name\n__proto__,Evil\noldtom,Old Tom\n", "apps.csv");
+test("a product named __proto__ is stored as a real row, not prototype pollution", async () => {
+  const { mapping } = await parseApplicationsFile(
+    sheetFile([
+      ["product", "brand_name"],
+      ["__proto__", "Evil"],
+      ["oldtom", "Old Tom"],
+    ]),
+  );
   // both rows present and counted; the __proto__ row is a real, matchable product
   assert.deepEqual(Object.keys(mapping).sort(), ["__proto__", "oldtom"]);
   assert.equal(appRowFor(mapping, "__proto__")?.brand_name, "Evil");
@@ -195,39 +302,33 @@ test("a product named __proto__ is stored as a real row, not prototype pollution
   assert.equal(appRowFor(mapping, "oldtom")?.brand_name, "Old Tom");
 });
 
-test("mid-field quotes are literal, matching Python's csv reader", () => {
-  const grid = parseCsv('product,brand_name\na,BRAND "X" WHISKEY\n');
-  assert.equal(grid[1][1], 'BRAND "X" WHISKEY');
-  // an inch-mark must not flip the parser into quoted mode for the rest of the file
-  const grid2 = parseCsv('product,net_contents\na,12" tall\nb,750 mL\n');
-  assert.deepEqual(grid2[2], ["b", "750 mL"]);
-});
-
-test("falsy JSON values collapse like Python's `or` (0/false are blank, not '0'/'false')", () => {
-  const json = JSON.stringify([
-    { product: 0, brand_name: "skipped — blank product" },
-    { product: "a", alcohol_content: 0, brand_name: false },
-  ]);
-  const { mapping, error } = parseApplications(json, "apps.json");
-  assert.equal(error, null);
-  assert.equal(Object.keys(mapping).length, 1);
-  assert.equal(mapping.a.alcohol_content, "");
-  assert.equal(mapping.a.brand_name, "");
-  assert.equal(appRowFor(mapping, "a"), null); // all-blank row -> rules-only
-});
-
-test("binary content gets the save-as-CSV guidance, not a misleading 'no rows' error", () => {
-  const { error } = parseApplications("PK\u0003\u0004\u0000binary junk", "apps.csv");
-  assert.equal(error, "the file isn't plain text — save it as a regular CSV or JSON file");
-});
-
-test("pickApplicationRow: stem match, single-row fallback, ambiguity -> null", () => {
-  const { mapping } = parseApplications(
-    "product,brand_name\na,X\nb,Y\n",
-    "apps.csv",
+test("pickApplicationRow: stem match, single-row fallback, ambiguity -> null", async () => {
+  const { mapping } = await parseApplicationsFile(
+    sheetFile([["product", "brand_name"], ["a", "X"], ["b", "Y"]]),
   );
   assert.equal(pickApplicationRow(mapping, "A").row?.brand_name, "X");
   assert.equal(pickApplicationRow(mapping, "zzz").row, null);
-  const single = parseApplications("product,brand_name\nonly,Z\n", "apps.csv").mapping;
+  const single = (
+    await parseApplicationsFile(sheetFile([["product", "brand_name"], ["only", "Z"]]))
+  ).mapping;
   assert.equal(pickApplicationRow(single, "nomatch").row?.brand_name, "Z");
+});
+
+// --- the downloadable template ------------------------------------------------------
+
+test("the template round-trips through the parser: examples load, no warnings", async () => {
+  const bytes = await buildApplicationsTemplate();
+  const { mapping, error, warnings } = await parseApplicationsFile(
+    new File([bytes], "ttb-application-template.xlsx"),
+  );
+  assert.equal(error, null);
+  assert.deepEqual(warnings, []); // the instructions sheet must not trip the multi-sheet warning
+  assert.deepEqual(Object.keys(mapping).sort(), ["oldtom", "riverbend"]);
+  assert.equal(mapping.oldtom.brand_name, "OLD TOM RESERVE");
+  assert.equal(mapping.riverbend.country_of_origin, "Product of France");
+  // every verifier column is present and filled in at least one example row
+  const rows: AppRow[] = Object.values(mapping);
+  for (const fld of Object.keys(rows[0]) as (keyof AppRow)[]) {
+    assert.ok(rows.some((r) => r[fld].trim() !== ""), `template never fills ${fld}`);
+  }
 });

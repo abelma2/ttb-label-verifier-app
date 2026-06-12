@@ -89,7 +89,7 @@ export async function runBatch(
 
   async function worker(): Promise<void> {
     while (next < products.length) {
-      if (signal?.aborted) throw new VerifyError("cancelled", "Batch screening was cancelled.");
+      if (signal?.aborted) throw new VerifyError("cancelled", "Screening was cancelled.");
       const idx = next++;
       const { label, files } = products[idx];
       const base = { label, fileNames: files.map((f) => f.name) };

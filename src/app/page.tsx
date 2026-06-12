@@ -26,7 +26,7 @@ export default function Home() {
         <Tabs
           tabs={[
             { id: "single", label: "Single label", content: <VerifierClient /> },
-            { id: "batch", label: "Batch screening", content: <BatchClient /> },
+            { id: "batch", label: "Multiple labels", content: <BatchClient /> },
           ]}
         />
       </main>
