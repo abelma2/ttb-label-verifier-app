@@ -276,10 +276,23 @@ _NAME_ADDRESS_STOPWORDS = frozenset({"by", "and", "the", "of", "for", *_RELATION
 
 # One-or-more relationship verbs (optionally joined by ,/and/&) followed by "BY" — matched
 # at the START only, so a producer name containing one of these words mid-string is never touched.
+# Each verb must be followed by exactly ONE of: a ,/& separator, the word "and", or plain
+# whitespace. The earlier `\s*(?:,|and|&)?\s*` form let the engine split a single whitespace
+# run between two quantifiers in k+1 ways, which the outer `+` compounded into catastrophic
+# backtracking (minutes of CPU on ~20 verbs with no trailing "by" — a model-degeneration
+# input — pinning the event loop, since verify() runs on it).
 _RELATIONSHIP_PREFIX_RE = re.compile(
-    r"^\s*(?:(?:" + "|".join(_RELATIONSHIP_VERBS) + r")\s*(?:,|and|&)?\s*)+by\b[\s:\-–—]*",
+    r"^\s*(?:(?:" + "|".join(_RELATIONSHIP_VERBS)
+    # the zero-width (?=by\b) arm keeps the fused-transcription case ("BOTTLEDBY:")
+    # stripping like the old pattern did; it consumes nothing and only fires when
+    # "by" immediately follows, which also ends the loop — no ambiguity added.
+    + r")(?:\s*[,&]\s*|\s+and\s+|\s+|(?=by\b)))+by\b[\s:\-–—]*",
     re.IGNORECASE,
 )
+# A real relationship phrase is short ("PRODUCED, BLENDED AND BOTTLED BY" is ~35 chars);
+# bounding the text the regex sees is a backstop so no pathological transcription can make
+# it crawl an entire field, regardless of the pattern's backtracking behavior.
+_RELATIONSHIP_PREFIX_WINDOW = 160
 
 
 def _without_relationship_prefix(field_obj):
@@ -287,9 +300,19 @@ def _without_relationship_prefix(field_obj):
     that is ONLY the phrase keeps its original value, so a partial read still flows through
     the missing/unreadable logic unchanged."""
     if isinstance(field_obj, dict) and isinstance(field_obj.get("value"), str):
-        stripped = _RELATIONSHIP_PREFIX_RE.sub("", field_obj["value"]).strip()
-        if stripped and stripped != field_obj["value"]:
-            return {**field_obj, "value": stripped}
+        value = field_obj["value"]
+        window = value[:_RELATIONSHIP_PREFIX_WINDOW]
+        m = _RELATIONSHIP_PREFIX_RE.match(window)
+        # A match running to the edge of a TRUNCATED window may owe its final word
+        # boundary to the cut itself ("...MADE BY|RON ..."): discard it rather than
+        # slice a word in half. Real phrases end far inside the window.
+        if (m and m.end() == len(window) and len(value) > len(window)
+                and (value[m.end()].isalnum() or value[m.end()] == "_")):
+            m = None
+        if m:
+            stripped = value[m.end():].strip()
+            if stripped and stripped != value:
+                return {**field_obj, "value": stripped}
     return field_obj
 
 

@@ -140,6 +140,8 @@ test("progress reports done/total as items complete", async () => {
 test("errorShort: neutral fallback that never photo-blames, proto-chain-safe", () => {
   assert.equal(errorShort("unknown"), "service error — try again");
   assert.equal(errorShort("file_too_large"), "an image is too large");
+  // the user-fixable corrupt-image kind points at the FILE, not the service
+  assert.equal(errorShort("bad_image"), "unreadable image file — re-export it");
   // an unmapped kind gets a neutral message, NOT "could not read image"
   assert.equal(errorShort("some_future_kind"), "verification failed — try again");
   assert.equal(errorShort(null), "verification failed — try again");
