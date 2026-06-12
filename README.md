@@ -32,7 +32,7 @@ assumptions made, in three pages.
 *Single label: the demo spiced rum read from a front + back pair and matched against its
 application values — 7 checks, 7 pass.*
 
-![Batch screening results table](.github/assets/batch-results.png)
+![Batch screening results table](.github/assets/batch-results.jpg)
 *Batch: the six demo products screened in parallel; the worst results sort to the top.*
 
 ## Quick start
