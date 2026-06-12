@@ -44,13 +44,16 @@ design, not by `allow_origins=["*"]`.
 
 ```
 api/                  FastAPI serverless function (index.py) + Pydantic models (_models.py)
-src/                  Next.js app: app/ (pages), components/, lib/ (types, api client, image prep)
-config.py             regulatory constants & tunable thresholds (env-overridable)
+src/                  Next.js app: app/ (pages), components/, lib/ (types, api client,
+                      batch orchestration, stem grouping, Excel parsing, image prep)
+config.py             regulatory constants & tunable thresholds (some env-overridable)
 extraction.py         vision extraction -> fixed JSON schema
 verification.py       deterministic verification -> pass/needs_review/fail per field
 tests/                test_verification.py (engine) + test_api.py (API glue; mocks the model)
-examples/             ready-to-use demo labels (images only — type application values
-                      manually, or start from the in-app Excel template)
+examples/             demo labels + walkthrough README (type application values manually,
+                      or start from the in-app Excel template)
+next.config.ts        dev proxy / prod rewrite for /api/py/*
+requirements.txt      lean deploy manifest (requirements-dev.txt adds uvicorn, pytest, …)
 vercel.json           Python function config (maxDuration)
 .vercelignore         keeps all dev/test/tooling content out of deployments
 ```
