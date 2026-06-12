@@ -209,11 +209,6 @@ def _image_blocks(images, media_type="image/png") -> list:
     return blocks
 
 
-def _build_content(images, media_type="image/png", prompt=_PROMPT):
-    """Build the user-message content: the prompt followed by one block per image."""
-    return [{"type": "text", "text": prompt}] + _image_blocks(images, media_type)
-
-
 # --- Structured Outputs schema ----------------------------------------------
 # Strict JSON Schema mirroring the extraction contract: the API guarantees the response
 # SHAPE, not the correctness of any observation inside it. _coerce still normalizes values
