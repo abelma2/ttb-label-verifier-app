@@ -108,9 +108,12 @@ text, or unrelated statements in name_and_address.
 - country_of_origin: the country-of-origin statement for imports, e.g. "PRODUCT OF SCOTLAND"; \
 present=false for domestic product with no such statement.
 - appellation: (WINE) the appellation of origin -- where the grapes were grown -- a country, \
-state, county, American Viticultural Area (AVA), or other growing area, e.g. "Napa Valley", \
-"Hudson River Region", "Sonoma County", "American". present=false if none is printed; for \
-beer/spirits present=false.
+state, county, American Viticultural Area (AVA), or a FOREIGN region/controlled designation, \
+e.g. "Napa Valley", "Hudson River Region", "Sonoma County", "American", "Champagne", \
+"Chianti", "Rioja", "Aglianico del Taburno". On imported wine the appellation is often the \
+foreign region printed NEAR THE BRAND NAME (e.g. "CHAMPAGNE" under the brand) or inside the \
+designation -- transcribe the printed region word(s) here too in that case. present=false if \
+none is printed; for beer/spirits present=false.
 - vintage: (WINE) the vintage year if a year is printed, e.g. "2018". present=false if no \
 vintage year appears; for beer/spirits present=false.
 - government_warning: the federal health warning.
