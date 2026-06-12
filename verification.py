@@ -268,16 +268,39 @@ def _check_net_contents(field_obj, expected) -> FieldResult:
 # subset read is routed to needs-review instead of auto-passing. (Module-local, not config.py:
 # this is a guard mechanic, not a regulatory knob — promote it to config on request.)
 _NAME_ADDRESS_COVERAGE_FLOOR = 0.6
-# Connectives PLUS the standard bottler/producer RELATIONSHIP-phrase words ("Brewed & Bottled By",
-# "Distilled & Bottled By", "Produced and Bottled By", "Imported By"). These are NOT part of the
-# producer name/address, so they are treated as non-significant for the coverage + producer-token
-# checks — making the match invariant to whether the relationship prefix is printed. (The
-# relationship TYPE — bottled vs imported — is a separate compliance check, not done here.)
-_NAME_ADDRESS_STOPWORDS = frozenset({
-    "by", "and", "the", "of", "for",
+# The standard bottler/producer RELATIONSHIP verbs ("Brewed & Bottled By", "Distilled &
+# Bottled By", "Produced and Bottled By", "Imported By", "Made and Bottled By"). The phrase
+# is the required relationship disclosure (27 CFR 4.35/5.66/7.66), NOT part of the producer
+# name/address, so it is (a) non-significant for the coverage + producer-token checks and
+# (b) stripped from the FRONT of the displayed/compared read (_without_relationship_prefix)
+# so the field shows just the name and address. (The relationship TYPE — bottled vs
+# imported — is a separate compliance check, not done here; the raw transcription in the
+# response's `extracted` block still carries the full statement as reviewer evidence.)
+_RELATIONSHIP_VERBS = (
     "brewed", "bottled", "distilled", "produced", "manufactured",
-    "packed", "blended", "vinted", "cellared", "imported",
-})
+    "packed", "blended", "vinted", "cellared", "imported", "made", "canned",
+)
+_NAME_ADDRESS_STOPWORDS = frozenset({"by", "and", "the", "of", "for", *_RELATIONSHIP_VERBS})
+
+# One-or-more relationship verbs (optionally joined by ,/and/&) followed by "BY" and any
+# trailing separator — matched at the START of the read only, so a producer name that
+# legitimately contains one of these words mid-string is never touched.
+_RELATIONSHIP_PREFIX_RE = re.compile(
+    r"^\s*(?:(?:" + "|".join(_RELATIONSHIP_VERBS) + r")\s*(?:,|and|&)?\s*)+by\b[\s:\-–—]*",
+    re.IGNORECASE,
+)
+
+
+def _without_relationship_prefix(field_obj):
+    """The name_and_address field object with a leading relationship phrase ("DISTILLED AND
+    BOTTLED BY:", "VINTED & BOTTLED BY") removed from .value. A read that is ONLY the phrase
+    keeps its original value, so a partial read still flows through the existing
+    missing/unreadable logic unchanged."""
+    if isinstance(field_obj, dict) and isinstance(field_obj.get("value"), str):
+        stripped = _RELATIONSHIP_PREFIX_RE.sub("", field_obj["value"]).strip()
+        if stripped and stripped != field_obj["value"]:
+            return {**field_obj, "value": stripped}
+    return field_obj
 
 
 def _significant_tokens(s) -> set:
@@ -291,7 +314,9 @@ def _normalize_address(s) -> str:
     """Name/address-specific normalization used ONLY for the match score: on top of _normalize
     (casefold + apostrophes + whitespace), map '&' -> 'and' and drop punctuation (commas/colons/
     periods) that otherwise sticks to tokens and makes token_set_ratio brittle ('Distillery,' !=
-    'Distillery'). The original value/expected strings are still what gets displayed."""
+    'Distillery'). The displayed strings are untouched by THIS normalization (the read shown is
+    the prefix-stripped value from _without_relationship_prefix; expected is the applicant's
+    raw value)."""
     s = _normalize(s).replace("&", " and ")
     return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", s)).strip()
 
@@ -892,7 +917,8 @@ def verify(extracted: dict, application: dict) -> dict:
         _check_abv(extracted.get("alcohol_content"), application.get("alcohol_content"),
                    beverage_type, extracted.get("class_type")),
         _check_net_contents(extracted.get("net_contents"), application.get("net_contents")),
-        _check_name_address(extracted.get("name_and_address"), application.get("name_and_address")),
+        _check_name_address(_without_relationship_prefix(extracted.get("name_and_address")),
+                            application.get("name_and_address")),
         _check_country(extracted.get("country_of_origin"), application.get("country_of_origin")),
         _check_warning(extracted.get("government_warning")),
     ]
@@ -917,7 +943,8 @@ def verify_label_only(extracted: dict) -> dict:
         _check_presence("class_type", extracted.get("class_type")),
         _check_abv(extracted.get("alcohol_content"), None, beverage_type, extracted.get("class_type")),
         _check_presence("net_contents", extracted.get("net_contents")),
-        _check_presence("name_and_address", extracted.get("name_and_address")),
+        _check_presence("name_and_address",
+                        _without_relationship_prefix(extracted.get("name_and_address"))),
         _check_warning(extracted.get("government_warning")),
     ]
     if beverage_type == "wine":

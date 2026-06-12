@@ -20,7 +20,8 @@ from extraction import _coerce, _build_content, _model_params, _parse_response, 
 from verification import (
     verify, verify_label_only,
     _check_text, _check_abv, _check_net_contents, _check_country,
-    _check_name_address, _check_warning, _check_presence, _check_appellation, _parse_abv,
+    _check_name_address, _without_relationship_prefix, _check_warning, _check_presence,
+    _check_appellation, _parse_abv,
     PASS, REVIEW, FAIL,
 )
 
@@ -347,6 +348,38 @@ def test_name_address_dropped_producer_no_prefix_reviews():
 def test_name_address_totally_different_fails():
     r = _check_name_address(field("XYZ Brewing, Boston, MA"), "ABC Distillery, Frederick, MD")
     assert r.status == FAIL
+
+
+# the LEADING relationship phrase is stripped from the DISPLAYED read (the match score was
+# already phrase-invariant): the field shows just the producer name and address. Applied at
+# the verify()/verify_label_only() call sites, so these go through the public entry points.
+
+def test_address_leading_relationship_phrase_stripped_from_read():
+    extract = _good_spirits_extract()
+    extract["name_and_address"] = field("DISTILLED AND BOTTLED BY: ABC DISTILLERY FREDERICK,MD")
+    app = dict(_good_application(), name_and_address="ABC Distillery Frederick, MD")
+    na = next(f for f in verify(extract, app)["fields"] if f.field == "name_and_address")
+    assert na.status == PASS
+    assert na.extracted == "ABC DISTILLERY FREDERICK,MD"
+
+
+def test_address_prefix_stripped_in_label_only_screening():
+    extract = _good_wine_extract()
+    extract["name_and_address"] = field("VINTED AND BOTTLED BY 19 CRIMES, SONOMA, CA")
+    na = next(f for f in verify_label_only(extract)["fields"] if f.field == "name_and_address")
+    assert na.status == PASS
+    assert na.extracted == "19 CRIMES, SONOMA, CA"
+
+
+def test_address_phrase_only_read_keeps_original_value():
+    # a read that is ONLY the phrase must not be emptied into the missing-value path
+    assert _without_relationship_prefix(field("BOTTLED BY"))["value"] == "BOTTLED BY"
+
+
+def test_address_midstring_phrase_untouched():
+    # only a LEADING phrase is stripped; one inside the producer statement is left alone
+    untouched = "ABC FARMS, PRODUCED AND BOTTLED BY ABC, NAPA, CA"
+    assert _without_relationship_prefix(field(untouched))["value"] == untouched
 
 
 @pytest.mark.xfail(strict=True, reason="KNOWN GAP: a producer-name word substitution still passes "
