@@ -28,6 +28,10 @@ export default function VerifierClient() {
   const [prefill, setPrefill] = useState<{ name: string; parsed: ParsedApplications } | null>(null);
   const [prefillMessage, setPrefillMessage] = useState<string | null>(null);
   const [resultSig, setResultSig] = useState<string | null>(null);
+  // snapshot of the files a shown verdict was computed from — the results
+  // sidebar must keep showing THOSE images even if the upload slots change
+  const [verifiedFiles, setVerifiedFiles] = useState<{ front: File; back: File | null } | null>(null);
+  const [resultImages, setResultImages] = useState<{ url: string; alt: string }[]>([]);
   const resultsRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const prefillInputRef = useRef<HTMLInputElement>(null);
@@ -56,6 +60,23 @@ export default function VerifierClient() {
     setPrefillMessage(`Application file: ${message}.${warningText}`);
   }, [prefill, frontStem]);
 
+  // Object URLs for the verified files (results sidebar), revoked on change/unmount.
+  useEffect(() => {
+    if (!verifiedFiles) {
+      setResultImages([]);
+      return;
+    }
+    const entries = [
+      { file: verifiedFiles.front, alt: `Front label: ${verifiedFiles.front.name}` },
+      ...(verifiedFiles.back
+        ? [{ file: verifiedFiles.back, alt: `Back label: ${verifiedFiles.back.name}` }]
+        : []),
+    ];
+    const made = entries.map((e) => ({ url: URL.createObjectURL(e.file), alt: e.alt }));
+    setResultImages(made);
+    return () => made.forEach((m) => URL.revokeObjectURL(m.url));
+  }, [verifiedFiles]);
+
   // Signature of the inputs a shown verdict was computed from. When the current
   // inputs drift from it, the result is stale — a reviewer must never read an
   // old verdict against a swapped image or edited application value.
@@ -79,6 +100,7 @@ export default function VerifierClient() {
       if (abortRef.current !== controller) return;
       setResult(response);
       setResultSig(inputSig); // remember which inputs this verdict came from
+      setVerifiedFiles({ front, back }); // the files this verdict was read from
       setPhase("done");
       setAnnouncement(
         `Verification complete: ${OVERALL_ANNOUNCEMENT[response.overall] ?? response.overall}. ` +
@@ -123,6 +145,7 @@ export default function VerifierClient() {
     setApplication({});
     setResult(null);
     setResultSig(null);
+    setVerifiedFiles(null);
     setError(null);
     setPrefill(null);
     setPrefillMessage(null);
@@ -291,7 +314,7 @@ export default function VerifierClient() {
                 set above — click Verify label to refresh, or Start over.
               </p>
             )}
-            <ResultsView result={result} />
+            <ResultsView result={result} images={resultImages} />
           </>
         )}
       </div>

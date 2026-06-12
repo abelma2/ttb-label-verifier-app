@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import type { FieldVerdict, Status, VerifyResponse } from "@/lib/types";
 import { fieldLabel } from "@/lib/types";
 import { OtherLabelDetails } from "./EvidencePanels";
@@ -20,6 +21,65 @@ const BANNER: Record<Status, { title: string; className: string }> = {
 
 /** Focus target after results render (keyboard/screen-reader users land here). */
 export const RESULTS_HEADING_ID = "results-heading";
+
+/** One label image in the preview sidebar: rendered large inline, click for the
+ *  full-screen lightbox (same native-<dialog> pattern as the upload slots). */
+function PreviewImage({ url, alt }: { url: string; alt: string }) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => dialogRef.current?.showModal()}
+        aria-haspopup="dialog"
+        aria-label={`View full screen: ${alt}`}
+        title="Click for full screen"
+        className="shrink-0 cursor-zoom-in rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600 lg:block lg:w-full"
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={url}
+          alt={alt}
+          className="h-32 w-auto rounded-lg border border-slate-200 bg-slate-50 object-contain lg:h-auto lg:max-h-[26rem] lg:w-full"
+        />
+      </button>
+      <dialog
+        ref={dialogRef}
+        aria-label={`Large preview: ${alt}`}
+        onClick={(e) => {
+          // a click on the ::backdrop is delivered to the dialog element itself
+          if (e.target === e.currentTarget) e.currentTarget.close();
+        }}
+        className="m-auto max-w-[94vw] rounded-2xl p-0 shadow-2xl backdrop:bg-slate-900/80"
+      >
+        <div className="flex flex-col">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={url} alt={alt} className="max-h-[80vh] max-w-[92vw] bg-slate-50 object-contain" />
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t border-slate-200 bg-white px-4 py-2.5">
+            <p className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800">{alt}</p>
+            <div className="flex items-center gap-2">
+              <a
+                href={url}
+                target="_blank"
+                rel="noopener"
+                className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600"
+              >
+                Open full size in new tab
+              </a>
+              <button
+                type="button"
+                onClick={() => dialogRef.current?.close()}
+                className="rounded-lg bg-slate-100 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      </dialog>
+    </>
+  );
+}
 
 const LONG_TEXT_THRESHOLD = 160;
 
@@ -71,7 +131,9 @@ export interface ProductReportProps {
   result: VerifyResponse;
   /** id for the focusable banner heading (single mode's focus target) */
   headingId?: string;
-  /** preview object-URLs for the product's uploaded images (batch detail) */
+  /** preview object-URLs for the verified images — rendered as a label-preview
+   *  sidebar (sticky on large screens) beside the validation results, so a
+   *  reviewer can read the label while checking what passed or failed */
   images?: { url: string; alt: string }[];
   /** per-product read time in seconds (batch detail) */
   elapsed?: number | null;
@@ -80,7 +142,8 @@ export interface ProductReportProps {
 }
 
 /** One product's full verification report: verdict banner, field cards, photo
- *  note, warning-absence hint, and the evidence expanders. */
+ *  note, warning-absence hint, and the evidence expanders — with the label
+ *  preview in a left column when images are provided. */
 export function ProductReport({
   result,
   headingId,
@@ -106,8 +169,8 @@ export function ProductReport({
   const warning = result.fields.find((f) => f.field === "government_warning");
   const warningAbsent = warning?.status === "fail" && warning.cause === "absence";
 
-  return (
-    <section aria-label="Verification results">
+  const report = (
+    <div className="min-w-0">
       <div className={`rounded-xl border p-5 ${banner.className}`}>
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h2 id={headingId} tabIndex={headingId ? -1 : undefined} className="text-lg font-bold outline-none">
@@ -141,20 +204,6 @@ export function ProductReport({
         </p>
       )}
 
-      {images && images.length > 0 && (
-        <div className="mt-3 flex flex-wrap gap-2">
-          {images.map((img) => (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              key={img.url}
-              src={img.url}
-              alt={img.alt}
-              className="h-28 rounded-lg border border-slate-200 object-contain"
-            />
-          ))}
-        </div>
-      )}
-
       <ul className="mt-4 space-y-3">
         {result.fields.map((f) => (
           <FieldCard
@@ -172,11 +221,42 @@ export function ProductReport({
           imageQualityNotes={result.image_quality_notes}
         />
       </div>
+    </div>
+  );
+
+  if (!images || images.length === 0) {
+    return <section aria-label="Verification results">{report}</section>;
+  }
+  return (
+    <section
+      aria-label="Verification results"
+      className="lg:grid lg:grid-cols-[300px,minmax(0,1fr)] lg:items-start lg:gap-5"
+    >
+      {/* Label preview sidebar: horizontal strip on small screens, sticky
+          column on large ones so the label stays beside the results while
+          scrolling the field verdicts. */}
+      <aside
+        aria-label="Label preview"
+        className="mb-4 flex gap-3 overflow-x-auto lg:sticky lg:top-6 lg:mb-0 lg:block lg:space-y-3 lg:overflow-visible"
+      >
+        {images.map((img) => (
+          <PreviewImage key={img.url} url={img.url} alt={img.alt} />
+        ))}
+      </aside>
+      {report}
     </section>
   );
 }
 
 /** Single-label mode's results view. */
-export default function ResultsView({ result }: { result: VerifyResponse }) {
-  return <ProductReport result={result} headingId={RESULTS_HEADING_ID} showModeSentence />;
+export default function ResultsView({
+  result,
+  images,
+}: {
+  result: VerifyResponse;
+  images?: { url: string; alt: string }[];
+}) {
+  return (
+    <ProductReport result={result} headingId={RESULTS_HEADING_ID} images={images} showModeSentence />
+  );
 }

@@ -46,17 +46,30 @@ function fileKey(f: File): string {
   return `${f.name}|${f.size}|${f.lastModified}`;
 }
 
-/** Self-managing preview thumbnail (object URL created/revoked with the file). */
-function FileThumb({ file, alt }: { file: File; alt: string }) {
-  const [url, setUrl] = useState<string | null>(null);
+/** One product's detail report with its label-preview sidebar: builds object
+ *  URLs for the product's files (revoked on change/unmount) and hands them to
+ *  ProductReport so the images sit beside the validation results. */
+function DetailReport({
+  item,
+  product,
+}: {
+  item: BatchItem;
+  product?: { label: string; files: File[] };
+}) {
+  const [images, setImages] = useState<{ url: string; alt: string }[]>([]);
   useEffect(() => {
-    const u = URL.createObjectURL(file);
-    setUrl(u);
-    return () => URL.revokeObjectURL(u);
-  }, [file]);
-  if (!url) return null;
-  // eslint-disable-next-line @next/next/no-img-element
-  return <img src={url} alt={alt} className="h-28 rounded-lg border border-slate-200 object-contain" />;
+    if (!product) {
+      setImages([]);
+      return;
+    }
+    const made = product.files.map((f) => ({
+      url: URL.createObjectURL(f),
+      alt: `Uploaded image ${f.name}`,
+    }));
+    setImages(made);
+    return () => made.forEach((m) => URL.revokeObjectURL(m.url));
+  }, [product]);
+  return <ProductReport result={item.result!} elapsed={item.seconds} images={images} />;
 }
 
 export default function BatchClient() {
@@ -652,14 +665,7 @@ export default function BatchClient() {
                             {item.errorMessage}
                           </p>
                         ) : (
-                          <ProductReport result={item.result!} elapsed={item.seconds} />
-                        )}
-                        {!isError && product && (
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            {product.files.map((f) => (
-                              <FileThumb key={fileKey(f)} file={f} alt={`Uploaded image ${f.name}`} />
-                            ))}
-                          </div>
+                          <DetailReport item={item} product={product} />
                         )}
                       </div>
                     </details>
