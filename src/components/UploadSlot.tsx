@@ -58,7 +58,28 @@ export default function UploadSlot({
         {label}
       </span>
       {file ? (
-        <div className="rounded-xl border border-slate-200 bg-white p-3">
+        <div
+          onDragOver={(e) => {
+            // accept replacement drops on the filled card too — without this the
+            // drop lands on an unclaimed element and only the window-level
+            // DropGuard saves the session (the gesture would silently no-op)
+            e.preventDefault();
+            if (!disabled && !dialogRef.current?.open) setDragging(true);
+          }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDragging(false);
+            // the open lightbox (and its backdrop, whose events are delivered
+            // to the dialog element) is a child of this card, so a drop there
+            // bubbles here — viewing is read-only and must not swap the file
+            if (disabled || dialogRef.current?.open) return;
+            accept(e.dataTransfer.files?.[0]);
+          }}
+          className={`rounded-xl border bg-white p-3 transition-colors ${
+            dragging ? "border-blue-500 bg-blue-50" : "border-slate-200"
+          }`}
+        >
           <div className="flex items-center gap-3">
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium text-slate-800">{file.name}</p>

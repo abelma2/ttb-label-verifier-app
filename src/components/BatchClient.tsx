@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { MAX_IMAGES_PER_PRODUCT, VerifyError } from "@/lib/api";
 import {
   APP_FIELDS,
@@ -16,6 +16,12 @@ import type { Status } from "@/lib/types";
 import { ProductReport } from "./ResultsView";
 
 type Phase = "idle" | "running" | "done";
+
+/** Cancelling settles in microtasks, so the Cancel button relabels to "Clear
+ *  all" within one frame — faster than the second click of a double-click.
+ *  Clear clicks inside this window are the tail of a Cancel double-click, not
+ *  an intent to destroy the inputs and the previous run's results. */
+const CANCEL_CLICK_GRACE_MS = 600;
 
 type DetailFilter = "all" | Status | "error";
 
@@ -91,6 +97,7 @@ export default function BatchClient() {
   const imageInputRef = useRef<HTMLInputElement>(null);
   const appInputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const cancelClickedAt = useRef(-Infinity);
   const appFileSeq = useRef(0);
   const resultsRef = useRef<HTMLDivElement>(null);
 
@@ -150,7 +157,19 @@ export default function BatchClient() {
     }
   }
 
-  async function handleScreen() {
+  /** The second click of a double-click that started on Cancel: the cancel
+   *  settles in microtasks, so the row re-renders — and REFLOWS, the primary
+   *  button relabels and widens — before the second click lands. It can hit
+   *  "Clear all" (wiping inputs and the previous results) or the re-enabled
+   *  Screen button (restarting the just-cancelled run, costing API spend).
+   *  e.detail > 1 catches OS-recognized double-clicks even when the user's
+   *  configured double-click interval exceeds the time window. */
+  function isCancelClickTail(e: MouseEvent<HTMLButtonElement>): boolean {
+    return e.detail > 1 || performance.now() - cancelClickedAt.current < CANCEL_CLICK_GRACE_MS;
+  }
+
+  async function handleScreen(e: MouseEvent<HTMLButtonElement>) {
+    if (isCancelClickTail(e)) return;
     if (products.length === 0 || running) return;
     const controller = new AbortController();
     abortRef.current = controller;
@@ -210,10 +229,12 @@ export default function BatchClient() {
    *  untouched (the button says "Cancel", not "Clear"). The run's catch sets
    *  phase back to idle. */
   function handleCancel() {
+    cancelClickedAt.current = performance.now();
     abortRef.current?.abort();
   }
 
-  function handleClear() {
+  function handleClear(e: MouseEvent<HTMLButtonElement>) {
+    if (isCancelClickTail(e)) return;
     abortRef.current?.abort();
     abortRef.current = null; // close the same-tick window where a completing run resurrects state
     appFileSeq.current++; // an in-flight parse must not resurrect the cleared mapping

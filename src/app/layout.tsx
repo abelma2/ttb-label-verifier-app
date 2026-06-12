@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import DropGuard from "@/components/DropGuard";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -12,6 +13,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body className="min-h-screen bg-slate-50 font-sans text-slate-900 antialiased">
+        <DropGuard />
         {children}
       </body>
     </html>
