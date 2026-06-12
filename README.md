@@ -25,6 +25,9 @@ locally in three commands ([Quick start](#quick-start)) and try the bundled
 a thin FastAPI serverless function over a shared Python engine, deployed as one Vercel
 project.
 
+**Design rationale:** [APPROACH.md](APPROACH.md) — the approach, tools used, and
+assumptions made, in three pages.
+
 ![Single-label verification results](.github/assets/single-label-results.jpg)
 *Single label: the demo spiced rum read from a front + back pair and matched against its
 application values — 7 checks, 7 pass.*
