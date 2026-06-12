@@ -16,10 +16,21 @@ import { ProductReport } from "./ResultsView";
 
 type Phase = "idle" | "running" | "done";
 
+/** Detail-list filter: every result key plus "all" (the default view). */
+type DetailFilter = "all" | Status | "error";
+
 const STATUS_LABEL: Record<Status, string> = {
   pass: "Pass",
   needs_review: "Needs review",
   fail: "Fail",
+};
+
+const FILTER_ACTIVE: Record<DetailFilter, string> = {
+  all: "border-blue-700 bg-blue-700 text-white",
+  pass: "border-emerald-200 bg-pass-soft text-emerald-900",
+  needs_review: "border-amber-200 bg-review-soft text-amber-900",
+  fail: "border-red-200 bg-fail-soft text-red-900",
+  error: "border-slate-300 bg-slate-100 text-slate-900",
 };
 
 /** Worst-first ordering for the results table. */
@@ -62,6 +73,7 @@ export default function BatchClient() {
   const [elapsed, setElapsed] = useState<number | null>(null);
   const [resultsSig, setResultsSig] = useState<string | null>(null);
   const [page, setPage] = useState(1);
+  const [detailFilter, setDetailFilter] = useState<DetailFilter>("all");
   const [announcement, setAnnouncement] = useState("");
   const [dragging, setDragging] = useState(false);
   const [rejectedNote, setRejectedNote] = useState<string | null>(null);
@@ -145,6 +157,7 @@ export default function BatchClient() {
       setElapsed(secs);
       setResultsSig(currentSig);
       setPage(1);
+      setDetailFilter("all");
       setPhase("done");
       const counts = { fail: 0, error: 0, needs_review: 0, pass: 0 };
       results.forEach((it) => (counts[itemKey(it) as keyof typeof counts] += 1));
@@ -195,6 +208,7 @@ export default function BatchClient() {
     setElapsed(null);
     setResultsSig(null);
     setPage(1);
+    setDetailFilter("all");
     setPhase("idle");
     if (imageInputRef.current) imageInputRef.current.value = "";
     if (appInputRef.current) appInputRef.current.value = "";
@@ -211,7 +225,19 @@ export default function BatchClient() {
       : counts.needs_review
         ? "border-amber-200 bg-review-soft text-amber-900"
         : "border-emerald-200 bg-pass-soft text-emerald-900";
-  const nPages = Math.max(1, Math.ceil(ranked.length / PAGE_SIZE));
+  const detailRanked =
+    detailFilter === "all" ? ranked : ranked.filter((i) => itemKey(items![i]) === detailFilter);
+  const nPages = Math.max(1, Math.ceil(detailRanked.length / PAGE_SIZE));
+  const filterOptions: { key: DetailFilter; label: string; count: number }[] = items
+    ? [
+        { key: "all", label: "All", count: items.length },
+        { key: "pass", label: STATUS_LABEL.pass, count: counts.pass },
+        { key: "needs_review", label: STATUS_LABEL.needs_review, count: counts.needs_review },
+        { key: "fail", label: STATUS_LABEL.fail, count: counts.fail },
+        // Error is not a verdict — only offer the filter when a product actually errored.
+        ...(counts.error > 0 ? [{ key: "error" as const, label: "Error", count: counts.error }] : []),
+      ]
+    : [];
 
   return (
     <div className="space-y-6">
@@ -552,27 +578,62 @@ export default function BatchClient() {
             </div>
 
             <div>
-              <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
                 <h3 className="text-base font-semibold text-slate-900">Per-product detail</h3>
-                {nPages > 1 && (
-                  <label className="flex items-center gap-2 text-sm text-slate-600">
-                    Detail page
-                    <select
-                      value={page}
-                      onChange={(e) => setPage(Number(e.target.value))}
-                      className="rounded-lg border border-slate-300 px-2 py-1 text-sm"
-                    >
-                      {Array.from({ length: nPages }, (_, p) => (
-                        <option key={p + 1} value={p + 1}>
-                          Page {p + 1} of {nPages}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                )}
+                <div className="flex flex-wrap items-center gap-3">
+                  <div role="group" aria-label="Filter detail by result" className="flex flex-wrap gap-1.5">
+                    {filterOptions.map((opt) => (
+                      <button
+                        key={opt.key}
+                        type="button"
+                        aria-pressed={detailFilter === opt.key}
+                        disabled={opt.count === 0}
+                        onClick={() => {
+                          if (opt.key === detailFilter) return; // re-click must not yank pagination
+                          setDetailFilter(opt.key);
+                          setPage(1);
+                          const noun = opt.count === 1 ? "product" : "products";
+                          setAnnouncement(
+                            opt.key === "all"
+                              ? `Showing all ${opt.count} ${noun}.`
+                              : `Showing ${opt.count} ${opt.label.toLowerCase()} ${noun}.`,
+                          );
+                        }}
+                        className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:cursor-not-allowed disabled:opacity-40 ${
+                          detailFilter === opt.key
+                            ? FILTER_ACTIVE[opt.key]
+                            : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                        }`}
+                      >
+                        {detailFilter === opt.key && (
+                          <svg viewBox="0 0 16 16" aria-hidden="true" className="h-3 w-3 fill-current">
+                            <path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-6.5 6.5a.75.75 0 0 1-1.06 0l-3-3a.75.75 0 1 1 1.06-1.06l2.47 2.47 5.97-5.97a.75.75 0 0 1 1.06 0Z" />
+                          </svg>
+                        )}
+                        {opt.label} ({opt.count})
+                      </button>
+                    ))}
+                  </div>
+                  {nPages > 1 && (
+                    <label className="flex items-center gap-2 text-sm text-slate-600">
+                      Detail page
+                      <select
+                        value={page}
+                        onChange={(e) => setPage(Number(e.target.value))}
+                        className="rounded-lg border border-slate-300 px-2 py-1 text-sm"
+                      >
+                        {Array.from({ length: nPages }, (_, p) => (
+                          <option key={p + 1} value={p + 1}>
+                            Page {p + 1} of {nPages}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                </div>
               </div>
               <div className="mt-3 space-y-3">
-                {ranked.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((i) => {
+                {detailRanked.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((i) => {
                   const item = items[i];
                   const isError = itemKey(item) === "error";
                   const status = isError ? "Error" : STATUS_LABEL[item.result!.overall];
