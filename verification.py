@@ -609,15 +609,33 @@ def _check_appellation(beverage_type, class_obj, vintage_obj, appellation_obj) -
 # The canonical warning body (the statement after the "GOVERNMENT WARNING:" header).
 # Labels commonly print the body in all-caps, and the vision model sometimes returns the
 # body WITHOUT the header, so wording is matched on the body, case-insensitively.
-_WARNING_HEADER_RE = re.compile(r"^\s*government\s+warning\s*:?\s*", re.IGNORECASE)
+# Leading/wrapping quote characters are tolerated around the header: some labels print
+# '"GOVERNMENT WARNING:" (1) ...' with the header in quotation marks (e.g. the Half Batch
+# label family), and a quote in front of "GOVERNMENT" must not stop the header strip.
+_WARNING_HEADER_RE = re.compile(
+    r"^[\s\"'“”‘’]*government\s*warning\s*:?[\"'“”‘’]*\s*",
+    re.IGNORECASE)
 
 
 def _warning_body(text) -> str:
     return _WARNING_HEADER_RE.sub("", text or "", count=1)
 
 
+def _wording_canon(s) -> str:
+    """Spacing/hyphenation-insensitive form for the WORDING comparison ONLY. Labels print
+    the warning justified (wide inter-word gaps), condensed (words nearly touching),
+    line-wrapped with hyphenation, and occasionally wrapped in quotation marks -- so
+    transcriptions carry merged words, split words, "PREG- NANCY" artifacts, and decorative
+    quotes that are TYPOGRAPHY, not wording. Strip ALL whitespace, dashes (incl. soft
+    hyphen), and quote characters on both sides; letters and the punctuation that is part
+    of the statement (commas, periods, parens, colons) must still match exactly. The
+    canonical body contains no dashes or quotes, so stripping them cannot mask a
+    substantive wording difference."""
+    return re.sub(r"[\s\-–—­\"'“”‘’]+", "", _normalize(s))
+
+
 _CANONICAL_WARNING_BODY = _warning_body(GOVERNMENT_WARNING)
-_CANONICAL_WARNING_BODY_NORM = _normalize(_CANONICAL_WARNING_BODY)
+_CANONICAL_WARNING_BODY_CANON = _wording_canon(_CANONICAL_WARNING_BODY)
 
 
 def _check_warning(gw) -> FieldResult:
@@ -631,12 +649,14 @@ def _check_warning(gw) -> FieldResult:
         present, else fall back to the model's header_all_caps, with caps==False as a
         fail backstop;
       - require the "S" in Surgeon / "G" in General to be capitalized (all-caps is fine);
-      - handle BOLD per config.WARNING_BOLD_POLICY (default "note_null_review": a
-        determinate header_bold observation never gates -- the warning PASSES with the
-        observation recorded on the reason; only a NULL read (header unreadable) goes to
-        needs-review as a readability flag. Nothing about bold can fail a label.
-        body_bold is a recorded note. The inline comment at the bold block documents
-        all policies.)
+      - handle BOLD per config.WARNING_BOLD_POLICY (default "supplement_gate": judge the
+        merged bold observation -- the warning reader's when WARNING_SUPPLEMENT_MODEL ran
+        (its read also supplies text/caps post-merge), else the main read marked as
+        fallback. True -> PASS, False -> needs review, null -> needs review; confidence
+        ignored; a main-vs-checker disagreement is noted as evidence, never gated. Bold can
+        never FAIL a label; the absence cross-check above turns a one-reader "no warning"
+        into a review when the other reader transcribed one. The inline comment at the
+        bold block documents all policies.)
     Title case fails and an unverifiable bold read goes to review; a near-miss wording read
     goes to needs-review; nothing non-exact ever auto-passes.
     """
@@ -646,22 +666,53 @@ def _check_warning(gw) -> FieldResult:
     caps = gw.get("header_all_caps")
 
     if not present or not text:
+        # Absence cross-check: after the warning-supplement merge, present/text here are the
+        # WARNING READER's call, so this branch means the warning reader found nothing. When
+        # the main read DID transcribe a warning, the absence is contested -- two readers
+        # disagree about whether the statement exists -- so route to a human instead of
+        # hard-failing on one reader's miss. Absence FAILs only when both readers found
+        # nothing (or the single reader, when the supplement is disabled / fell back).
+        if gw.get("warning_observer") == "supplement" and (gw.get("main_present")
+                                                           or gw.get("main_text")):
+            return FieldResult("government_warning", text or "", GOVERNMENT_WARNING, REVIEW,
+                               "the warning reader found no government warning, but the main "
+                               "read transcribed one — please verify against the label image",
+                               cause="absence")
         return FieldResult("government_warning", text or "", GOVERNMENT_WARNING, FAIL,
                            "no government warning found on the label", cause="absence")
 
-    body_norm = _normalize(_warning_body(text))
-    if body_norm != _CANONICAL_WARNING_BODY_NORM:
-        # Not exact. The model can misread small print, so a near match goes to review
-        # (a human verifies) rather than a hard fail; nothing non-exact auto-passes.
-        score = fuzz.ratio(body_norm, _CANONICAL_WARNING_BODY_NORM)
+    body_canon = _wording_canon(_warning_body(text))
+    if (body_canon != _CANONICAL_WARNING_BODY_CANON
+            and not body_canon.startswith(_CANONICAL_WARNING_BODY_CANON)):
+        # Not exact (after the spacing/hyphenation-insensitive canon -- see _wording_canon:
+        # justified gaps, merged words, and line-break hyphens are typography, not wording).
+        # A read that STARTS with the complete exact statement and continues into ADJACENT
+        # label text (e.g. "CONTAINS SULFITES" printed right below the warning) is
+        # transcription scoping, not a wording deviation -- it falls through to caps/bold,
+        # and the full read is displayed on the field card so the reviewer sees the
+        # trailing text. One decimal in the score display: a tiny deviation (e.g. one
+        # missing statutory comma) rounds to "100% similar" at integer precision, which
+        # told the reviewer nothing differed.
+        score = fuzz.ratio(body_canon, _CANONICAL_WARNING_BODY_CANON)
         if score >= WARNING_WORDING_REVIEW_FLOOR:
+            if gw.get("warning_observer") == "supplement":
+                # The warning reader's transcription is measured-exact, so a near-miss is
+                # evidence of a REAL label deviation, not a photo problem. The phrasing
+                # deliberately avoids _READABILITY_REASON_HINTS so the image-quality
+                # reframer cannot rewrite this into "submit a clearer image" -- that
+                # message hid the diagnosis precisely when it was most reliable.
+                return FieldResult("government_warning", text, GOVERNMENT_WARNING, REVIEW,
+                                   f"warning wording differs slightly from the required text "
+                                   f"({min(score, 99.9):.1f}% similar) — likely a missing or "
+                                   f"extra punctuation mark or word printed on the label; "
+                                   f"verify against the label image", cause="wording")
             return FieldResult("government_warning", text, GOVERNMENT_WARNING, REVIEW,
                                f"warning wording is close but not an exact match "
-                               f"({score:.0f}% similar) — the read may be imperfect; "
-                               f"please verify the exact text against the label", cause="wording")
+                               f"({min(score, 99.9):.1f}% similar) — check the read against the "
+                               f"label (often a missing/extra punctuation mark)", cause="wording")
         return FieldResult("government_warning", text, GOVERNMENT_WARNING, FAIL,
-                           f"warning wording does not match the required text ({score:.0f}% similar)",
-                           cause="wording")
+                           f"warning wording does not match the required text "
+                           f"({score:.1f}% similar)", cause="wording")
 
     # Header caps: deterministic from the verbatim text when the header is present there (so
     # title case fails), else fall back to the model's header_all_caps observation, with an
@@ -688,9 +739,12 @@ def _check_warning(gw) -> FieldResult:
                                cause="caps")
 
     # Bold handling per config.WARNING_BOLD_POLICY (see config.py for the full description).
-    #   "note_null_review" -> DEFAULT. A determinate observation (True/False, any confidence)
-    #                    PASSES with the observation on the reason; only null -> REVIEW
-    #                    (header unreadable). Bold can never FAIL a label.
+    #   "supplement_gate" -> DEFAULT. Judges the merged observation (the warning reader's when
+    #                    the supplement ran): True -> PASS, False -> REVIEW, null -> REVIEW.
+    #                    Confidence ignored; disagreement noted, never gated; bold never FAILs.
+    #   "note_null_review" -> prior default (env-selectable). A determinate observation
+    #                    (True/False, any confidence) PASSES with the observation on the
+    #                    reason; only null -> REVIEW (header unreadable). Bold never FAILs.
     #   "header_simple_gate" -> prior default (env-selectable). Observation only, confidence
     #                    IGNORED: True -> PASS, False -> REVIEW, null -> FAIL ("submit a
     #                    clearer label image"). body_bold is a note.
@@ -716,6 +770,39 @@ def _check_warning(gw) -> FieldResult:
     # diffed line-by-line; a shared PASS/escalate helper remains a deferred future cleanup.
     bold = gw.get("header_bold")
     bold_conf = gw.get("header_bold_confidence", "low")
+    if WARNING_BOLD_POLICY == "supplement_gate":
+        # Judges the merged bold observation (the warning reader's when the supplement ran;
+        # extraction falls back to the main read and marks warning_observer on failure).
+        # Confidence is ignored -- measured to carry no signal. A main-vs-checker
+        # disagreement is appended as evidence, never arbitrated (the checker was right in
+        # 32 of 33 measured disagreements). Bold can never FAIL a label; the absence
+        # cross-check above is this gate's only influence on a FAIL path.
+        notes = []
+        if gw.get("body_bold") is True and gw.get("body_bold_confidence") in ("medium", "high"):
+            notes.append("note: the warning body also reads as bold — recorded as an "
+                         "observation only")
+        observer = gw.get("warning_observer")
+        if observer == "supplement":
+            main_obs = gw.get("main_header_bold")
+            if main_obs is not None and main_obs != bold:
+                notes.append("the full-read model disagreed on bold — recorded as evidence")
+        elif observer == "main-fallback":
+            notes.append("warning reader unavailable — judged from the main read")
+        suffix = " (" + "; ".join(notes) + ")" if notes else ""
+        if bold is True:
+            result = FieldResult("government_warning", text, GOVERNMENT_WARNING, PASS,
+                                 "wording, capital letters, and bold header verified" + suffix,
+                                 cause="bold")
+            return _escalate(result, gw.get("confidence"))
+        if bold is False:
+            return FieldResult("government_warning", text, GOVERNMENT_WARNING, REVIEW,
+                               f"'{GOVERNMENT_WARNING_HEADER}' was read as NOT bold — please "
+                               f"confirm the header's bold type against the label image"
+                               + suffix, cause="bold")
+        return FieldResult("government_warning", text, GOVERNMENT_WARNING, REVIEW,
+                           f"could not confirm '{GOVERNMENT_WARNING_HEADER}' is in bold — the "
+                           f"header could not be read clearly from this image; please verify"
+                           + suffix, cause="bold")
     if WARNING_BOLD_POLICY == "note_null_review":
         # Reviewer guidance (2026-06-12): bold is not expected to be machine-verifiable from
         # photos, so a determinate observation never gates -- it is recorded for the reviewer

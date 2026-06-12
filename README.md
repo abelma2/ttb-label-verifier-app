@@ -64,7 +64,8 @@ vercel.json           Python function config (maxDuration)
 | --- | --- | --- |
 | `OPENAI_API_KEY` | yes | OpenAI **API platform** key (platform.openai.com, billing enabled — not a ChatGPT subscription) |
 | `EXTRACTION_MODEL` | no | override the vision model (default `gpt-5.4-mini`, chosen by a 5× stability benchmark) |
-| `WARNING_BOLD_POLICY` | no | bold handling for the government warning (default `note_null_review` — a determinate bold observation never gates and is recorded on the result; only an unreadable header goes to needs-review; bold can never fail a label. Gating modes remain selectable: `header_simple_gate`, `note`, `header_medium_gate`, `medium_pass_gate`, `header_body_gate`; see `config.py`) |
+| `WARNING_SUPPLEMENT_MODEL` | no | dedicated second reader for the **entire government warning** — verbatim text, header caps, and bold — run **in parallel** with the main extraction on the same images (default `gpt-4.1` — measured 100% warning-verdict accuracy on ground truth vs 70% for the full-extraction read, and it transcribes a reworded warning faithfully instead of reciting the federal text; cross-family on purpose). Its read is what the wording/caps/bold checks judge; the main read is kept as evidence, and when the two readers disagree on whether a warning exists at all the verdict is a review, never a one-reader fail. Adds no latency (~1–2s, always finished first in testing) and one small API call per product. Set empty to disable |
+| `WARNING_BOLD_POLICY` | no | bold handling for the government warning (default `supplement_gate` — judges the merged bold observation, confidence ignored: bold → pass, not bold → needs review, can't tell → needs review; disagreements noted as evidence; bold can never fail a label. Other modes remain selectable: `note_null_review`, `header_simple_gate`, `note`, `header_medium_gate`, `medium_pass_gate`, `header_body_gate`; see `config.py`) |
 
 The FastAPI layer reads the key from the environment only (`os.environ`). Locally, copy
 `.env.example` to `.env` (gitignored) and the dev servers load it for you; on Vercel, set
@@ -151,16 +152,22 @@ Rules are grounded in the three TTB Beverage Alcohol Manuals (cited in `config.p
 TTB's "Checklist of Mandatory Label Information" per class:
 
 - **Government warning** (27 CFR part 16) — exact wording; "GOVERNMENT WARNING" in caps
-  **and bold**; "S"/"G" in Surgeon General capitalized. Wording and caps are judged
-  deterministically from the transcription. Bold is **recorded, not gated**
-  (`note_null_review`, the default): repeated ground-truth runs showed font-weight reads
-  from photos are unstable at every confidence level, so a determinate observation
-  (bold or not bold) passes with the observation noted on the result for the reviewer —
-  who sees the label image beside the verdicts — and only an *unreadable* header (the
-  model could form no observation at all) goes to needs-review. Bold can never fail a
-  label. The body-bold observation is likewise recorded as a note. (Gating modes remain
-  selectable: `WARNING_BOLD_POLICY=header_simple_gate`, `note`, `header_medium_gate`,
-  `medium_pass_gate`, `header_body_gate`.)
+  **and bold**; "S"/"G" in Surgeon General capitalized. The whole warning block is read
+  by a **dedicated second reader** (`WARNING_SUPPLEMENT_MODEL`, default `gpt-4.1`) that
+  runs in parallel with the main extraction: ground-truth testing showed the focused
+  cross-family read is exact on transcription (81/81), case-faithful (catches title-case),
+  faithful on reworded warnings (transcribes, doesn't recite), and 100% accurate on the
+  full warning verdict — versus 70% for the main full-extraction read, whose bold reads
+  are unstable at every confidence level. Wording and caps are then judged
+  deterministically from that transcription; the bold gate (`supplement_gate`, the
+  default) is deliberately simple — read as bold → pass; read as **not** bold → needs
+  review (confirm against the label image shown beside the verdicts); unreadable → needs
+  review. Confidence is ignored, a reader disagreement is recorded as evidence (never
+  arbitrated), bold can never fail a label, and when only one of the two readers finds a
+  warning at all, the absence verdict is a review rather than a one-reader fail. The
+  body-bold observation rides along as a note. (Single-model modes remain selectable:
+  `WARNING_BOLD_POLICY=note_null_review`, `header_simple_gate`, `note`,
+  `header_medium_gate`, `medium_pass_gate`, `header_body_gate`.)
 - **Alcohol content** — class-dependent presence; bare "ABV" notation fails (not a TTB
   form); a proof inconsistent with the stated ABV fails.
 - **Wine appellation** — conditionally mandatory when the label shows a varietal,
@@ -177,9 +184,9 @@ deliberately no automated pass/fail.
   vision" layout rules are out of scope (layout/geometry isn't reliably verifiable from
   one photo).
 - The vision model isn't perfectly deterministic; the warning check absorbs this (near
-  misses go to review, never silent passes), and bold reads vary run to run — which is
-  why bold is surfaced as a recorded observation for visual confirmation rather than
-  driving the verdict.
+  misses go to review, never silent passes). The main model's bold reads vary run to
+  run — which is why bold is judged from the dedicated parallel bold-only reader
+  (stable and 97–98% accurate in testing) and can route to review but never fail.
 - This calls an external vision API; a production deployment inside TTB's network would
   need an on-prem or allowlisted model.
 

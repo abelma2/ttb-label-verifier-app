@@ -554,8 +554,8 @@ def test_verify_label_only_wine_missing_appellation_fails():
 # --- government warning: the critical fail-closed rule -----------------------
 
 def test_warning_compliant_with_bold_true_passes():
-    # Under the default note_null_review policy, wording + ALL-CAPS are verified and the
-    # determinate bold observation is recorded (never gated), so a compliant warning PASSES.
+    # Under the default supplement_gate policy, wording + ALL-CAPS are verified and the
+    # bold=True observation passes (confidence ignored), so a compliant warning PASSES.
     assert _check_warning(warning()).status == PASS
 
 
@@ -568,7 +568,42 @@ def test_warning_note_policy_does_not_gate_on_bold(monkeypatch):
     assert _check_warning(warning(bold=True, bold_confidence="low")).status == PASS
 
 
-# --- note_null_review policy (the DEFAULT): observations recorded, only null reviews ------------
+# --- supplement_gate policy (the DEFAULT) is pinned above via the default tests; the merge
+# helper that feeds it lives in extraction.py and is pinned below -------------------------------
+
+def test_apply_warning_supplement_merges_and_keeps_main_as_evidence():
+    from extraction import _apply_warning_supplement
+    main_gw = warning(text="GOVERNMENT WARNING: misread text", caps=None,
+                      bold=False, bold_confidence="medium",
+                      body_bold=True, body_bold_confidence="low")
+    supp = warning(bold=True, bold_confidence="high",
+                   body_bold=False, body_bold_confidence="high")
+    gw = _apply_warning_supplement({"government_warning": main_gw}, supp)["government_warning"]
+    # the warning reader's read is now THE warning the verifier judges...
+    assert gw["text"] == GOVERNMENT_WARNING and gw["present"] is True
+    assert gw["header_all_caps"] is True
+    assert gw["header_bold"] is True and gw["header_bold_confidence"] == "high"
+    assert gw["body_bold"] is False
+    assert gw["warning_observer"] == "supplement"
+    # ...and the main model's original read is preserved as evidence
+    assert gw["main_text"] == "GOVERNMENT WARNING: misread text"
+    assert gw["main_present"] is True
+    assert gw["main_header_all_caps"] is None
+    assert gw["main_header_bold"] is False
+    assert gw["main_header_bold_confidence"] == "medium"
+    assert gw["main_body_bold"] is True
+
+
+def test_apply_warning_supplement_failure_marks_fallback():
+    from extraction import _apply_warning_supplement
+    extracted = {"government_warning": warning(bold=False)}
+    gw = _apply_warning_supplement(extracted, None)["government_warning"]
+    assert gw["warning_observer"] == "main-fallback"
+    assert gw["header_bold"] is False             # main's read left in place
+    assert "main_header_bold" not in gw and "main_text" not in gw
+
+
+# --- note_null_review policy (prior default, env-selectable) ------------------------------------
 
 def test_note_null_review_truth_table(monkeypatch):
     monkeypatch.setattr(verification, "WARNING_BOLD_POLICY", "note_null_review")
@@ -662,30 +697,77 @@ def test_header_medium_gate_body_bold_noted_on_reason(monkeypatch):
 # --- header_body_gate policy: header bold AND body-not-bold, both at HIGH confidence ------------
 # (the stricter two-rule gate; still env-selectable via WARNING_BOLD_POLICY=header_body_gate)
 
-def test_default_warning_bold_policy_is_note_null_review():
+def test_default_warning_bold_policy_is_supplement_gate():
     # pins the SHIPPED default (review #8). Every policy test below monkeypatches the mode, so
     # without this nothing would catch a reverted config default. (Fails if the WARNING_BOLD_POLICY
     # env var is set in the test environment -- that is the intended signal that it is not the default.)
     # Default history: header_body_gate -> medium_pass_gate (2026-06-11, course-staff guidance) ->
-    # header_medium_gate (2026-06-11, body bold demoted to a note) -> note -> header_simple_gate ->
-    # note_null_review (2026-06-12, per reviewer guidance that bold is not expected to be
-    # machine-verifiable from photos: a determinate observation never gates and is recorded on
-    # the reason; only an unreadable-header null goes to review; bold can never FAIL a label).
-    assert verification.WARNING_BOLD_POLICY == "note_null_review"
+    # header_medium_gate -> note -> header_simple_gate -> note_null_review (2026-06-12) ->
+    # supplement_gate (2026-06-12: the focused WARNING_SUPPLEMENT_MODEL read proved reliable --
+    # 97-98% ground-truth accuracy, zero nulls, stable across reruns -- so a "not bold"
+    # observation is worth a review row again; confidence stays ignored; bold never FAILs).
+    assert verification.WARNING_BOLD_POLICY == "supplement_gate"
 
 
-def test_default_policy_observation_never_gates_only_null_reviews():
+def test_default_policy_supplement_gate_triple():
     # BEHAVIORAL pin of the default (no monkeypatch), one cell per observation value, with
-    # confidence set to values that gated under prior defaults -- proving confidence is ignored
-    # and a determinate observation never gates. A quiet config revert flips at least one of
-    # these verdicts in a way the string-equality pin above alone would not surface.
+    # confidence set to values that gated differently under prior defaults -- proving
+    # confidence is ignored. A quiet config revert flips at least one of these verdicts in a
+    # way the string-equality pin above alone would not surface.
     assert _check_warning(warning(bold=True, bold_confidence="low")).status == PASS
     r_no = _check_warning(warning(bold=False, bold_confidence="high"))
-    assert r_no.status == PASS                    # was REVIEW/FAIL under every prior gate
-    assert "NOT bold" in r_no.reason              # the observation is recorded for the reviewer
+    assert r_no.status == REVIEW                  # was PASS under note_null_review
+    assert "NOT bold" in r_no.reason              # tells the reviewer what to confirm
     r_null = _check_warning(warning(bold=None, bold_confidence="high"))
     assert r_null.status == REVIEW                # unreadable header -> readability flag
-    assert "could not confirm" in r_null.reason
+    assert "could not confirm" in r_null.reason   # hooks the image-quality reframer
+
+
+def test_supplement_gate_disagreement_is_noted_never_gated():
+    # main's read disagrees with the warning reader's on bold: verdict comes from the
+    # reader's observation; the disagreement is appended to the reason as evidence only.
+    gw = warning(bold=True)                       # warning reader's (merged) read: bold
+    gw["warning_observer"] = "supplement"
+    gw["main_header_bold"] = False                # main disagreed
+    r = _check_warning(gw)
+    assert r.status == PASS
+    assert "disagreed" in r.reason
+    # agreement -> no disagreement note
+    gw_agree = warning(bold=True)
+    gw_agree["warning_observer"] = "supplement"
+    gw_agree["main_header_bold"] = True
+    assert "disagreed" not in _check_warning(gw_agree).reason
+
+
+def test_supplement_gate_fallback_is_noted():
+    # supplement call failed -> extraction marked main-fallback; verdict comes from the
+    # main read through the same gate, with the fallback recorded on the reason.
+    gw = warning(bold=False)
+    gw["warning_observer"] = "main-fallback"
+    r = _check_warning(gw)
+    assert r.status == REVIEW
+    assert "warning reader unavailable" in r.reason
+
+
+def test_absence_cross_check_softens_fail_to_review():
+    # post-merge, present/text are the WARNING READER's call. The reader found nothing but
+    # the main read transcribed a warning -> contested absence -> review, never a
+    # one-reader hard FAIL. Both readers found nothing -> genuine absence -> FAIL; the
+    # plain single-reader absence (no observer keys) also FAILs as before.
+    gw = warning(present=False, text=None, bold=None)
+    gw["warning_observer"] = "supplement"
+    gw["main_present"] = True                     # main transcribed a warning
+    gw["main_text"] = GOVERNMENT_WARNING
+    r = _check_warning(gw)
+    assert r.status == REVIEW and r.cause == "absence"
+    assert "main read transcribed one" in r.reason
+    plain = _check_warning(warning(present=False, text=None))
+    assert plain.status == FAIL and plain.cause == "absence"
+    both_absent = warning(present=False, text=None, bold=None)
+    both_absent["warning_observer"] = "supplement"
+    both_absent["main_present"] = False
+    both_absent["main_text"] = None
+    assert _check_warning(both_absent).status == FAIL
 
 
 def test_header_body_gate_pass_requires_both(monkeypatch):
@@ -913,6 +995,41 @@ def test_warning_near_miss_wording_is_review():
     # a one-word transcription slip is close to exact -> review (human verifies), not a fail
     bad = GOVERNMENT_WARNING.replace("women should not drink", "nobody should drink")
     assert _check_warning(warning(text=bad)).status == REVIEW
+
+
+def test_warning_spacing_and_hyphenation_artifacts_pass():
+    # spacing is TYPOGRAPHY, not wording: justified gaps, merged words, split words, and
+    # line-break hyphens on a 100%-correctly-worded warning must PASS, not flag.
+    variants = [
+        GOVERNMENT_WARNING.replace(" should not ", "  should   not "),     # wide gaps
+        GOVERNMENT_WARNING.replace("alcoholic beverages", "alcoholicbeverages"),  # merged
+        GOVERNMENT_WARNING.replace("pregnancy", "preg nancy"),             # split word
+        GOVERNMENT_WARNING.replace("pregnancy", "preg- nancy"),            # line-break hyphen
+        GOVERNMENT_WARNING.replace("pregnancy", "preg–\nnancy"),           # en-dash + newline
+        GOVERNMENT_WARNING.replace("machinery", "ma chin ery"),            # letter-spaced
+        GOVERNMENT_WARNING.replace("GOVERNMENT WARNING:",
+                                   '"GOVERNMENT WARNING:"'),               # quoted header
+        '"' + GOVERNMENT_WARNING + '"',                                    # fully quoted
+    ]
+    for text in variants:
+        r = _check_warning(warning(text=text))
+        assert r.status == PASS, f"spacing artifact flagged: {text[:80]!r} -> {r.reason}"
+
+
+def test_warning_punctuation_difference_still_flags():
+    # despacing must NOT mask substantive differences: dropped punctuation is still
+    # non-exact (the statement must match "exact wording and punctuation") -> review
+    bad = GOVERNMENT_WARNING.replace("birth defects.", "birth defects")
+    r = _check_warning(warning(text=bad))
+    assert r.status == REVIEW and r.cause == "wording"
+
+
+def test_warning_trailing_adjacent_text_is_not_a_wording_deviation():
+    # the read continued past the complete, exact statement into adjacent label text
+    # (e.g. "CONTAINS SULFITES" printed right below the warning): transcription scoping,
+    # not a wording deviation -> falls through to the caps/bold checks
+    r = _check_warning(warning(text=GOVERNMENT_WARNING + " CONTAINS SULFITES."))
+    assert r.status == PASS and r.cause == "bold"
 
 
 def test_warning_lowercase_surgeon_general_fails():
@@ -1412,15 +1529,41 @@ def test_reframe_does_not_touch_body_bold_violation_on_low_quality_image(monkeyp
 
 
 def test_default_policy_body_bold_passes_with_note_even_on_low_quality_image():
-    # the same input under the shipped note_null_review default: the determinate header
-    # observation passes and body bold is only a note — the warning PASSES and the note
-    # survives (PASS results are never reframed).
+    # the same input under the shipped supplement_gate default: the bold=True observation
+    # passes and body bold is only a note — the warning PASSES and the note survives
+    # (PASS results are never reframed).
     extract = _spirits_with(field("Old Tom Distillery, KY"), "soft, low-resolution back label")
     extract["government_warning"] = warning(bold=True, bold_confidence="high",
                                             body_bold=True, body_bold_confidence="high")
     gw = next(f for f in verify_label_only(extract)["fields"] if f.field == "government_warning")
     assert gw.status == PASS
     assert "body" in gw.reason.lower()
+
+
+def test_supplement_wording_near_miss_not_reframed_on_low_quality_image():
+    # a near-miss transcribed by the WARNING READER (measured-exact transcription) is
+    # evidence of a real label deviation -- the precise diagnosis must survive on a
+    # quality-flagged photo, NOT be rewritten into "submit a clearer image"
+    bad = GOVERNMENT_WARNING.replace("machinery, and", "machinery and")
+    gw = warning(text=bad)
+    gw["warning_observer"] = "supplement"
+    extract = _spirits_with(field("Old Tom Distillery, KY"), "glare on the back label")
+    extract["government_warning"] = gw
+    res = next(f for f in verify_label_only(extract)["fields"] if f.field == "government_warning")
+    assert res.status == REVIEW and res.cause == "wording"
+    assert "differs slightly" in res.reason
+    assert "could not verify required label information" not in res.reason
+
+
+def test_single_model_wording_near_miss_still_reframes_on_low_quality_image():
+    # without the supplement, a near-miss may just be the main model misreading small
+    # print -- the photo-quality reframe stays for that case
+    bad = GOVERNMENT_WARNING.replace("machinery, and", "machinery and")
+    extract = _spirits_with(field("Old Tom Distillery, KY"), "glare on the back label")
+    extract["government_warning"] = warning(text=bad)   # no observer keys (single-model)
+    res = next(f for f in verify_label_only(extract)["fields"] if f.field == "government_warning")
+    assert res.status == REVIEW
+    assert "could not verify required label information" in res.reason
 
 
 def test_reframe_still_rewords_unverifiable_bold_on_low_quality_image(monkeypatch):

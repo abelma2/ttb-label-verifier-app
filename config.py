@@ -32,19 +32,28 @@ GOVERNMENT_WARNING_HEADER = "GOVERNMENT WARNING"
 WARNING_WORDING_REVIEW_FLOOR = 90
 
 # Bold handling policy for the government warning. Modes:
-#   "note_null_review" -- DEFAULT (since 2026-06-12, per reviewer guidance that bold is not
-#                    expected to be machine-verifiable from photos with a VLM): a DETERMINATE
+#   "supplement_gate" -- DEFAULT (since 2026-06-12): judges the bold OBSERVATION in the
+#                    extraction (which, when WARNING_SUPPLEMENT_MODEL below is enabled, is the
+#                    warning-checker's read -- merged in by extraction.py -- with the main
+#                    model's read kept as evidence): True -> PASS (observation noted); False ->
+#                    NEEDS REVIEW ("confirm against the label image"); null -> NEEDS REVIEW
+#                    ("could not confirm ..." -- reframed by the image-quality machinery).
+#                    Confidence is ignored; bold can NEVER fail a label; a main-vs-checker
+#                    disagreement is appended to the reason as evidence, never gated. Measured
+#                    basis: the focused gpt-4.1 warning read scored 100% verdict accuracy on
+#                    ground truth with zero nulls and perfect rerun stability (vs ~47% bold
+#                    accuracy and ~30% stability for the full-extraction read), making every
+#                    confidence-tier gate collapse to this one rule. With the supplement
+#                    disabled, this gate applies to the main model's noisier read (its best
+#                    gate too, but expect more bold reviews -- or select note_null_review
+#                    below for the lenient single-model behavior).
+#   "note_null_review" -- prior default (2026-06-12, env-selectable; reviewer guidance that bold
+#                    is not machine-verifiable from photos with a single VLM): a DETERMINATE
 #                    header_bold observation (True or False, any confidence) NEVER gates -- the
-#                    warning PASSES with the observation recorded on the reason for the reviewer
-#                    to confirm against the on-screen label image. Only a NULL read (the model
-#                    could not see the header well enough to form an observation) goes to
-#                    needs-review, as a readability flag ("could not confirm ..." -- reframed by
-#                    the image-quality machinery on flagged photos). Nothing about bold can ever
-#                    FAIL a label. Measured basis (bold_safety, repeated runs): observations were
-#                    stable on only ~6/20 labels across reruns and even high-confidence reads
-#                    flipped, so every gating variant either flooded review (~50% false flags on
-#                    compliant labels at ~85% catch) or caught little; this mode is the explicit
-#                    "don't pretend" point on that curve. body_bold stays a recorded note.
+#                    warning PASSES with the observation recorded on the reason. Only a NULL read
+#                    goes to needs-review, as a readability flag. Nothing about bold can FAIL.
+#                    Superseded when the bold-only supplement model proved reliable enough to
+#                    make a "not bold" observation worth a review row again.
 #   "header_simple_gate" -- prior default (2026-06-12, env-selectable): observation alone,
 #                    confidence ignored -- True -> PASS, False -> NEEDS REVIEW (human confirms),
 #                    null -> FAIL ("submit a clearer label image"). The strongest screening
@@ -91,7 +100,7 @@ WARNING_WORDING_REVIEW_FLOOR = 90
 #                    ignoring confidence. Not recommended.
 # See BENCHMARK_NOTES.md (dev-archive branch; kept locally for dev) for the bold
 # experiments behind these choices.
-WARNING_BOLD_POLICY = os.environ.get("WARNING_BOLD_POLICY", "note_null_review")
+WARNING_BOLD_POLICY = os.environ.get("WARNING_BOLD_POLICY", "supplement_gate")
 
 # --- Fuzzy-match thresholds (0-100) for text fields (brand, class/type) -------
 #   score >= FUZZY_PASS          -> pass
@@ -161,6 +170,26 @@ ESCALATE_LOW_CONFIDENCE = True
 # gpt-4o/-mini, gpt-4.1-mini, o4-mini, or gpt-5.4-nano as the default -- they mishandle the bold
 # gate. Override at runtime with the EXTRACTION_MODEL env var (handy for A/B testing).
 EXTRACTION_MODEL = os.environ.get("EXTRACTION_MODEL", "gpt-5.4-mini")
+
+# Supplementary WARNING-ONLY reader for the government warning -- verbatim text, header
+# caps, and the bold observations -- run IN PARALLEL with the main extraction (same images,
+# the same warning wording as the main prompt, nothing else) and merged into the
+# extraction's government_warning by extraction.py: the supplement's read becomes THE
+# warning the verifier judges (wording, caps, AND bold); the main model's read is kept
+# alongside as evidence (main_present / main_text / main_header_all_caps / main_header_bold
+# / main_body_bold). Why a second model: measured head-to-head on ground truth, the focused
+# gpt-4.1 warning read scored 100% full-verdict accuracy (60/60; bold observation 60/60;
+# transcription exact 81/81 across datasets) at ~1-2s per call, while the main
+# full-extraction read managed 70% verdicts, ~50% bold accuracy, and spuriously flagged
+# canonical wording; the adversarial reworded-warning fixture confirmed the supplement
+# TRANSCRIBES what is printed (59% similarity -> wording FAIL) rather than reciting the
+# federal text from memory. CROSS-FAMILY diversity is deliberate: a gpt-5.4-mini supplement
+# repeated the main model's own misreads. The call is non-blocking (always finished before
+# the ~5-9s main call in testing -- zero added latency; any failure falls back to the main
+# read with a note) and powers the absence cross-check: when the two readers disagree about
+# whether a warning exists at all, the verdict is a review, never a one-reader hard FAIL.
+# Set to "" to disable entirely (single-model behavior, no second API call).
+WARNING_SUPPLEMENT_MODEL = os.environ.get("WARNING_SUPPLEMENT_MODEL", "gpt-4.1")
 
 # Hard ceiling on a single extraction call so a hung request fails fast instead of
 # blocking the UI (the per-label target is ~5s; this is a safety bound, not the target).

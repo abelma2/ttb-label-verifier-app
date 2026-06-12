@@ -80,7 +80,11 @@ class AlcoholContentField(ExtractedField):
 
 class GovernmentWarningField(BaseModel):
     """The model's warning OBSERVATIONS (evidence, not judgment) — surfaced so the
-    reviewer can see what the bold/caps verdict was based on."""
+    reviewer can see what the wording/caps/bold verdict was based on. When the
+    warning-only supplement reader ran (config.WARNING_SUPPLEMENT_MODEL), present/text/
+    caps/bold carry ITS read and the main model's original read moves to the main_*
+    fields (extraction._apply_warning_supplement); warning_observer says which reader
+    is in effect."""
     present: bool
     text: Optional[str] = None
     header_all_caps: Optional[bool] = None
@@ -90,6 +94,16 @@ class GovernmentWarningField(BaseModel):
     body_bold: Optional[bool] = None
     body_bold_confidence: Confidence = "low"
     confidence: Confidence = "low"
+    # warning-supplement merge metadata: "supplement" | "main-fallback"; all absent when
+    # the supplement is disabled (single-model extraction)
+    warning_observer: Optional[str] = None
+    main_present: Optional[bool] = None
+    main_text: Optional[str] = None
+    main_header_all_caps: Optional[bool] = None
+    main_header_bold: Optional[bool] = None
+    main_header_bold_confidence: Optional[Confidence] = None
+    main_body_bold: Optional[bool] = None
+    main_body_bold_confidence: Optional[Confidence] = None
 
 
 class Extraction(BaseModel):

@@ -64,7 +64,11 @@ export interface AlcoholContentField extends ExtractedField {
   proof: number | null;
 }
 
-/** The model's warning OBSERVATIONS (evidence, not judgment). */
+/** The model's warning OBSERVATIONS (evidence, not judgment). When the warning-only
+ *  supplement reader ran (WARNING_SUPPLEMENT_MODEL), present/text/caps/bold carry ITS
+ *  read and the main model's original read sits in the main_* fields;
+ *  warning_observer says which reader is in effect ("supplement" | "main-fallback",
+ *  absent when the supplement is disabled). */
 export interface GovernmentWarningField {
   present: boolean;
   text: string | null;
@@ -75,6 +79,14 @@ export interface GovernmentWarningField {
   body_bold: boolean | null;
   body_bold_confidence: Confidence;
   confidence: Confidence;
+  warning_observer?: string | null;
+  main_present?: boolean | null;
+  main_text?: string | null;
+  main_header_all_caps?: boolean | null;
+  main_header_bold?: boolean | null;
+  main_header_bold_confidence?: Confidence | null;
+  main_body_bold?: boolean | null;
+  main_body_bold_confidence?: Confidence | null;
 }
 
 /** The engine's coerced extraction (api/_models.py Extraction). */

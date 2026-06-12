@@ -18,11 +18,13 @@ import json
 import logging
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 from openai import (OpenAI, APIConnectionError, APITimeoutError, AuthenticationError,
                     RateLimitError)
 
-from config import EXTRACTION_MODEL, RATE_LIMIT_MAX_RETRIES, REQUEST_TIMEOUT_SECONDS
+from config import (EXTRACTION_MODEL, RATE_LIMIT_MAX_RETRIES, REQUEST_TIMEOUT_SECONDS,
+                    WARNING_SUPPLEMENT_MODEL)
 
 
 class ExtractionError(Exception):
@@ -280,17 +282,75 @@ _STRUCTURED_RF = {"type": "json_schema",
                                   "schema": _EXTRACTION_SCHEMA}}
 _JSON_OBJECT_RF = {"type": "json_object"}   # fallback for models without Structured Outputs
 
+# --- Warning-only supplement (WARNING_SUPPLEMENT_MODEL) -----------------------
+# A second, cross-family model reads ONLY the government warning -- verbatim text, header
+# caps, and the bold observations -- in parallel with the main extraction. Same wording as
+# the government_warning section of _PROMPT, standalone, plus one clarification the
+# ground-truth runs motivated: on all-bold labels the comparative bold question ("thicker
+# than the body?") is literally answerable as "no" even though the header IS in bold type.
+# See config.WARNING_SUPPLEMENT_MODEL for the measured rationale (100% verdict accuracy on
+# ground truth; transcribes a reworded warning faithfully rather than reciting the federal
+# text from memory).
+_WARNING_PROMPT = """You are a transcription assistant for U.S. TTB alcohol-beverage label \
+review. You are shown one OR MORE photos of a SINGLE alcohol beverage product. Find the \
+federal health warning statement (the government warning), wherever it appears across the \
+images. Return ONLY a JSON object in exactly this shape:
+{"present": true|false, "text": "..."|null, "header_all_caps": true|false|null, \
+"header_bold": true|false|null, "header_bold_confidence": "high"|"medium"|"low", \
+"header_bold_basis": "..."|null, "body_bold": true|false|null, "body_bold_confidence": \
+"high"|"medium"|"low", "confidence": "high"|"medium"|"low"}
+- text: transcribe the ENTIRE warning verbatim, INCLUDING the "GOVERNMENT WARNING:" header \
+words at the start, with EXACT capitalization preserved (do not drop the header). End the \
+transcription at the END of the warning statement itself -- do NOT include adjacent label \
+text that is not part of the warning (e.g. "CONTAINS SULFITES", net contents, or other \
+statements printed near it). Do NOT reconstruct the warning from memory or from the \
+standard federal wording -- transcribe ONLY the visible printed words; if a word is \
+unreadable, transcribe what you can and set confidence to "low" rather than inventing the \
+expected text.
+- header_all_caps: looking at the printed header words "GOVERNMENT WARNING", are they in ALL \
+CAPITAL LETTERS? true / false / null if not determinable.
+- header_bold: compare the visible stroke weight of the printed "GOVERNMENT WARNING" header \
+with the warning body text IMMEDIATELY AFTER it. true if the header letter strokes are visibly \
+thicker/heavier than that body text; false if they are the same weight, lighter, or not bold; \
+null if you cannot compare the strokes (blur, glare, cropping, tiny text, or no body text to \
+compare against). If BOTH the header and the body letter strokes appear heavy/bold, report \
+header_bold true -- the header IS in bold type even though it is not bolder than the body. \
+Do NOT infer bold from capitalization, font size, darkness, contrast, or expectation -- do \
+not assume bold just because warning headers are usually bold. If uncertain, use null and \
+low confidence.
+- header_bold_confidence: "high" / "medium" / "low" -- how sure you are of THIS bold judgment \
+specifically, based on how clearly you can see and compare the stroke weights.
+- header_bold_basis: one short phrase describing what you ACTUALLY saw; null if not determinable.
+- body_bold: is the WARNING BODY TEXT itself (the sentences AFTER the header) bold? Judge the \
+body's OWN letter strokes, separately from the header. true / false / null. Do NOT infer from \
+capitalization, size, darkness, contrast, or expectation. If uncertain, use null.
+- body_bold_confidence: "high" / "medium" / "low".
+- confidence: how sure you are of YOUR transcription overall, based on image clarity.
+Report what you SEE; do not judge compliance. If no government warning is visible anywhere \
+in the images, set present=false and null values."""
 
-def _model_params(model: str, response_format=_STRUCTURED_RF) -> dict:
+# The supplement returns exactly the extraction contract's government_warning shape, so it
+# reuses that subschema for Structured Outputs and _coerce_warning for normalization.
+_WARNING_RF = {"type": "json_schema",
+               "json_schema": {"name": "warning_check", "strict": True,
+                               "schema": _EXTRACTION_SCHEMA["properties"]["government_warning"]}}
+
+# How long extract_fields waits for the supplement AFTER the main call returns. The
+# supplement (~1-2s) finished before the main call (~5-9s) in every measured run, so this
+# only bites when the supplement hangs -- and then we fall back to the main read rather
+# than stretch the request.
+_SUPPLEMENT_WAIT_SECONDS = 10
+
+
+def _model_params(model: str) -> dict:
     """Per-model request params. Uses Structured Outputs (strict json_schema) so the response
     SHAPE is guaranteed by the API, not just by _coerce. The gpt-5/o-series reasoning models
     reject `max_tokens` and a non-default `temperature`, so they use `max_completion_tokens`
     and low/minimal reasoning; the gpt-4 family keeps `temperature=0`. Models that don't
-    support Structured Outputs fall back to json_object in the caller. `response_format` is
-    parameterized so the warning-only specialist can pass its own schema."""
+    support Structured Outputs fall back to json_object in the caller."""
     params = {
         "model": model,
-        "response_format": response_format,
+        "response_format": _STRUCTURED_RF,
         "max_completion_tokens": 3000,  # headroom for high-detail multi-image reads
     }
     if model.startswith(("gpt-5.4", "gpt-5.5")):
@@ -377,37 +437,100 @@ def failure_kind(exc) -> str:
     return "unknown"
 
 
+def _extract_warning_supplement(client, images, media_type) -> dict:
+    """Run the warning-only supplement read (verbatim text + caps + bold) and return the
+    coerced government_warning-shaped dict. Raises on any failure -- the caller treats
+    that as 'supplement unavailable'."""
+    content = _build_content(images, media_type, prompt=_WARNING_PROMPT)
+    params = _model_params(WARNING_SUPPLEMENT_MODEL)
+    params["response_format"] = _WARNING_RF
+    params["max_completion_tokens"] = 1000   # the warning block only, not the full schema
+    payload = _parse_json_payload(_create_with_fallbacks(client, content, params))
+    return _coerce_warning(payload)
+
+
+def _apply_warning_supplement(extracted: dict, supp: dict | None) -> dict:
+    """Merge the supplement's warning read into the extraction's government_warning.
+
+    With a successful supplement read, the supplement's fields (present, text, caps, bold)
+    become THE warning the verifier judges, and the main model's original read moves to
+    main_present / main_text / main_header_all_caps / main_header_bold / main_body_bold
+    as evidence (displayed, never gated). On a failed supplement (supp=None) the main read
+    stays in place and warning_observer records the fallback so the verifier can say so.
+    Pure function -- unit-testable without network."""
+    gw = extracted.get("government_warning")
+    if not isinstance(gw, dict):
+        return extracted
+    if supp is None:
+        gw["warning_observer"] = "main-fallback"
+        return extracted
+    gw["main_present"] = gw.get("present")
+    gw["main_text"] = gw.get("text")
+    gw["main_header_all_caps"] = gw.get("header_all_caps")
+    gw["main_header_bold"] = gw.get("header_bold")
+    gw["main_header_bold_confidence"] = gw.get("header_bold_confidence")
+    gw["main_body_bold"] = gw.get("body_bold")
+    gw["main_body_bold_confidence"] = gw.get("body_bold_confidence")
+    gw.update(supp)
+    gw["warning_observer"] = "supplement"
+    return extracted
+
+
 def extract_fields(images, media_type: str = "image/png") -> dict:
     """Return the structured label fields extracted from the image(s), coerced to schema.
 
     ``images`` may be a single bytes object (one label image) or a list of bytes /
     (bytes, media_type) tuples -- e.g. the front and back/"other" labels of the SAME
-    product, which the model reads together as one label."""
+    product, which the model reads together as one label.
+
+    When WARNING_SUPPLEMENT_MODEL is set, a warning-only read (verbatim text + caps +
+    bold) by that model runs IN PARALLEL with the main extraction (the supplement is
+    faster, so total latency stays the main call's) and its read is merged in by
+    _apply_warning_supplement. A supplement failure NEVER fails the extraction -- the
+    main read is used with a fallback marker."""
+    client = _get_client()   # created before threading so both calls share one client
     content = _build_content(images, media_type)
     params = _model_params(EXTRACTION_MODEL)
-    return _parse_response(_create_with_fallbacks(_get_client(), content, params))
+
+    if not WARNING_SUPPLEMENT_MODEL:
+        return _parse_response(_create_with_fallbacks(client, content, params))
+
+    executor = ThreadPoolExecutor(max_workers=1)
+    try:
+        supp_future = executor.submit(_extract_warning_supplement, client, images, media_type)
+        extracted = _parse_response(_create_with_fallbacks(client, content, params))
+        try:
+            supp = supp_future.result(timeout=_SUPPLEMENT_WAIT_SECONDS)
+        except Exception as exc:  # noqa: BLE001 -- ANY supplement failure is non-fatal
+            logging.getLogger(__name__).warning(
+                "warning supplement (%s) unavailable (%s); judging the warning from the "
+                "main read", WARNING_SUPPLEMENT_MODEL, failure_kind(exc))
+            supp = None
+        return _apply_warning_supplement(extracted, supp)
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
 
 
-def _parse_json_payload(response, label: str) -> dict:
-    """Shared response guard for both extraction calls: raise ExtractionError (naming the
-    call via ``label``) on a truncated / empty / invalid response, else return the decoded
-    JSON. A bad response must NOT be silently coerced into an 'all-absent' object -- that
-    would surface as a confident wrong verdict instead of a read error."""
+def _parse_json_payload(response) -> dict:
+    """Response guard for the extraction call: raise ExtractionError on a truncated / empty /
+    invalid response, else return the decoded JSON. A bad response must NOT be silently
+    coerced into an 'all-absent' object -- that would surface as a confident wrong verdict
+    instead of a read error."""
     choice = response.choices[0]
     if getattr(choice, "finish_reason", None) == "length":
-        raise ExtractionError(f"the {label} response was cut off at the token limit")
+        raise ExtractionError("the model response was cut off at the token limit")
     content = choice.message.content
     if not content:
-        raise ExtractionError(f"the {label} returned an empty response")
+        raise ExtractionError("the model returned an empty response")
     try:
         return json.loads(content)
     except json.JSONDecodeError as exc:
-        raise ExtractionError(f"the {label} did not return valid JSON: {exc}") from exc
+        raise ExtractionError(f"the model did not return valid JSON: {exc}") from exc
 
 
 def _parse_response(response) -> dict:
     """Turn an OpenAI response into the coerced schema, or raise ExtractionError."""
-    return _coerce(_parse_json_payload(response, "model"))
+    return _coerce(_parse_json_payload(response))
 
 
 # --- Defensive coercion ------------------------------------------------------
@@ -469,6 +592,31 @@ def _normalize_beverage_type(value) -> str:
     return _BEVERAGE_SYNONYMS.get(value.strip().casefold(), "unknown")
 
 
+def _coerce_warning(gw) -> dict:
+    """Normalize a government_warning object (from the main extraction OR the warning
+    supplement -- both return the same shape). This warning-field key set + coercion
+    feeds verification._check_warning."""
+    gw = gw if isinstance(gw, dict) else {}
+    text = gw.get("text")
+    if text is not None and not isinstance(text, str):
+        text = str(text)
+    present = gw.get("present")
+    if not isinstance(present, bool):
+        present = bool(text)
+    bold_basis = gw.get("header_bold_basis")
+    return {
+        "present": present,
+        "text": text,
+        "header_all_caps": _bool_or_none(gw.get("header_all_caps")),
+        "header_bold": _bool_or_none(gw.get("header_bold")),
+        "header_bold_confidence": _conf(gw.get("header_bold_confidence")),
+        "header_bold_basis": str(bold_basis) if bold_basis else None,
+        "body_bold": _bool_or_none(gw.get("body_bold")),
+        "body_bold_confidence": _conf(gw.get("body_bold_confidence")),
+        "confidence": _conf(gw.get("confidence")),
+    }
+
+
 def _coerce(raw: dict) -> dict:
     raw = raw if isinstance(raw, dict) else {}
     bev = _normalize_beverage_type(raw.get("beverage_type"))
@@ -482,27 +630,7 @@ def _coerce(raw: dict) -> dict:
     ac["proof"] = _num(ac.get("proof"))
     out["alcohol_content"] = ac
 
-    gw = raw.get("government_warning")
-    gw = gw if isinstance(gw, dict) else {}
-    text = gw.get("text")
-    if text is not None and not isinstance(text, str):
-        text = str(text)
-    present = gw.get("present")
-    if not isinstance(present, bool):
-        present = bool(text)
-    bold_basis = gw.get("header_bold_basis")
-    # This warning-field key set + coercion feeds verification._check_warning.
-    out["government_warning"] = {
-        "present": present,
-        "text": text,
-        "header_all_caps": _bool_or_none(gw.get("header_all_caps")),
-        "header_bold": _bool_or_none(gw.get("header_bold")),
-        "header_bold_confidence": _conf(gw.get("header_bold_confidence")),
-        "header_bold_basis": str(bold_basis) if bold_basis else None,
-        "body_bold": _bool_or_none(gw.get("body_bold")),
-        "body_bold_confidence": _conf(gw.get("body_bold_confidence")),
-        "confidence": _conf(gw.get("confidence")),
-    }
+    out["government_warning"] = _coerce_warning(raw.get("government_warning"))
 
     clean = []
     stmts = raw.get("additional_statements")
