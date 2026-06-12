@@ -4,7 +4,7 @@
   "private": true,
   "description": "Next.js frontend + FastAPI serverless backend for the TTB label verification engine",
   "engines": {
-    "node": ">=22.6"
+    "node": ">=22.6 <23"
   },
   "scripts": {
     "setup": "pip install -r requirements-dev.txt && npm install",
