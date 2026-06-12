@@ -26,7 +26,7 @@ a thin FastAPI serverless function over a shared Python engine, deployed as one 
 project.
 
 **Design rationale:** [Austin-Belman-APPROACH.pdf](Austin-Belman-APPROACH.pdf) — the approach, tools used, and
-assumptions made, in three pages.
+assumptions made, in two pages.
 
 ![Single-label verification results](.github/assets/single-label-results.jpg)
 *Single label: the demo spiced rum read from a front + back pair and matched against its
