@@ -16,12 +16,6 @@ with per-product detail.
 **Production web app:** Next.js (App Router) frontend + a thin FastAPI serverless
 function, deployed as one Vercel project.
 
-> `main` carries only what you need to download and run the app (plus ready-made
-> example labels in `examples/`). The full development history — benchmarks, the scored
-> eval harness, ground-truth fixtures, research notes, and the retired Streamlit
-> prototype this app grew out of — is preserved on the
-> [`dev-archive`](../../tree/dev-archive) branch.
-
 ## Architecture
 
 ```
