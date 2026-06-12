@@ -107,6 +107,9 @@ _FAILURE_RESPONSES = {
                         "Check the server's network connection and try again."),
     "bad_response": (502, "The vision model returned an unusable response. "
                           "Try again; if it persists, try a clearer image."),
+    "bad_image": (400, "One of the images could not be decoded by the vision service — "
+                       "the file may be corrupted or truncated. Re-export or re-photograph "
+                       "the label and try again."),
     "unknown": (500, "Label verification failed unexpectedly. Try again; "
                      "if it persists, check the server logs."),
 }

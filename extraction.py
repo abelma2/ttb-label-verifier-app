@@ -17,7 +17,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 from openai import (OpenAI, APIConnectionError, APITimeoutError, AuthenticationError,
-                    RateLimitError)
+                    BadRequestError, RateLimitError)
 
 from config import (EXTRACTION_MODEL, RATE_LIMIT_MAX_RETRIES, REQUEST_TIMEOUT_SECONDS,
                     WARNING_SUPPLEMENT_MODEL)
@@ -402,9 +402,10 @@ def _is_quota_error(exc) -> bool:
 def failure_kind(exc) -> str:
     """Coarse classification of an extraction failure so the UI can give accurate guidance
     instead of blaming every error on the photo: 'auth', 'quota' (out of credits),
-    'rate_limit', 'timeout', 'connection', 'bad_response', or 'unknown'. Timeout is checked
-    before connection because APITimeoutError subclasses APIConnectionError; the api_key
-    string check catches the client-constructor error when no key is configured at all."""
+    'rate_limit', 'timeout', 'connection', 'bad_response', 'bad_image', or 'unknown'.
+    Timeout is checked before connection because APITimeoutError subclasses
+    APIConnectionError; the api_key string check catches the client-constructor error when
+    no key is configured at all."""
     if isinstance(exc, AuthenticationError):
         return "auth"
     if isinstance(exc, RateLimitError):
@@ -415,6 +416,22 @@ def failure_kind(exc) -> str:
         return "connection"
     if isinstance(exc, ExtractionError):
         return "bad_response"
+    if isinstance(exc, BadRequestError):
+        # The one user-fixable 400: image data the model can't decode (a corrupt or
+        # truncated file whose intact header passed the API's magic-byte sniff —
+        # error code 'invalid_image_format' / 'invalid_image_url'). Match those
+        # specifically: a bare "image" substring would also catch e.g. a non-vision
+        # model rejecting image input (our misconfiguration) or a content-policy
+        # refusal — neither is a broken FILE, so they stay 'unknown' rather than
+        # telling the user to re-export a photo that would only be refused again.
+        msg = str(exc).lower()
+        code = str(getattr(exc, "code", None) or "")
+        if (code.startswith("invalid_image")
+                or "invalid_image" in msg
+                or ("image" in msg
+                    and any(w in msg for w in ("decode", "format", "parse", "corrupt")))):
+            return "bad_image"
+        return "unknown"
     if "api_key" in str(exc).lower():
         return "auth"
     return "unknown"

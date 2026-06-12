@@ -402,6 +402,39 @@ def test_address_midstring_phrase_untouched():
     assert _without_relationship_prefix(field(untouched))["value"] == untouched
 
 
+def test_address_fused_verb_by_prefix_stripped():
+    # OCR/model glue on condensed type: "BOTTLEDBY" with no space is still the
+    # phrase + producer (parity with the pre-rewrite pattern, via the (?=by\b) arm)
+    assert (_without_relationship_prefix(field("BOTTLEDBY OLD TOM DISTILLERY, KY"))["value"]
+            == "OLD TOM DISTILLERY, KY")
+    # ...but a BY-prefixed WORD is never split ("BYRON" is a name, not "BY RON")
+    untouched = "BOTTLEDBYRON HILLS WINERY, NAPA, CA"
+    assert _without_relationship_prefix(field(untouched))["value"] == untouched
+
+
+def test_address_window_edge_never_splits_a_word():
+    # a prefix match that ends exactly at the scan window owes its word boundary
+    # to the truncation: "...MADE  BY|RON..." must not strip to "RON DISTILLERY"
+    value = ("BOTTLED " * 19) + "MADE  " + "BYRON DISTILLERY, BARDSTOWN, KY"
+    assert _without_relationship_prefix(field(value))["value"] == value
+
+
+def test_address_adversarial_verb_run_completes_fast():
+    # A degenerate read of many relationship verbs with NO trailing "by" (an LLM
+    # repetition glitch — or a crafted label on the public demo) used to trigger
+    # catastrophic regex backtracking: ~23 s at 25 verbs, minutes-to-hours with
+    # double spaces. The de-ambiguated pattern + bounded window must stay linear.
+    import time
+    single = field(("BOTTLED " * 25) + "OLD TOM DISTILLERY, BARDSTOWN, KY")
+    double = field(("BOTTLED  " * 20) + "OLD TOM DISTILLERY, BARDSTOWN, KY")
+    long_tail = field("BREWED " + ("x" * 5000))  # window cap: huge values never fully scanned
+    t0 = time.perf_counter()
+    for bomb in (single, double, long_tail):
+        # no "by" -> no prefix match -> value unchanged
+        assert _without_relationship_prefix(bomb)["value"] == bomb["value"]
+    assert time.perf_counter() - t0 < 0.5  # broken behavior is minutes, real is microseconds
+
+
 def test_address_multiverb_import_prefix_stripped():
     # real-world case: "Imported & Distributed By:" — "distributed" is not a CFR phrase but
     # appears on real labels and must not block the leading strip

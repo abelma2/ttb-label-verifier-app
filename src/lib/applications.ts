@@ -284,14 +284,18 @@ export async function downloadApplicationsTemplate(): Promise<void> {
       type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     }),
   );
-  try {
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = TEMPLATE_FILENAME;
-    anchor.click();
-  } finally {
-    URL.revokeObjectURL(url);
-  }
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = TEMPLATE_FILENAME;
+  // in the document for the click: Firefox historically ignores the download
+  // attribute on a detached anchor
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  // WebKit resolves the blob URL asynchronously when the download navigation
+  // starts, so revoking in the same task kills the download on Safari (silent
+  // no-op button). Defer it, like SheetJS's own writeFile (60 s) does.
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
 /** The product's application row, or null when there is no row OR the row is

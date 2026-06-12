@@ -52,6 +52,30 @@ export default function UploadSlot({
     [onSelect],
   );
 
+  /** A multi-file drop on a one-image slot: load the first usable image and SAY
+   *  SO — which file is "first" depends on OS selection order, so silently
+   *  discarding the rest could put the back label in the Front slot with the
+   *  real front photo gone (the warning check then fails as "absent"). */
+  const acceptDrop = useCallback(
+    (list: FileList) => {
+      const files = [...list];
+      const first = files.find((f) => ACCEPTED_IMAGE_TYPES.includes(f.type)) ?? files[0];
+      accept(first);
+      if (files.length > 1 && first && ACCEPTED_IMAGE_TYPES.includes(first.type)) {
+        const rest =
+          files.length === 2
+            ? "Drop the other file on its own slot"
+            : "Drop the others on their own slots";
+        setRejected(
+          `${files.length} files were dropped, but this slot holds one image — only ` +
+            `${first.name} was loaded. ${rest}, or use the Multiple labels tab for ` +
+            "many products.",
+        );
+      }
+    },
+    [accept],
+  );
+
   return (
     <div>
       <span className="mb-1.5 block text-sm font-medium text-slate-700" id={`${id}-label`}>
@@ -74,7 +98,7 @@ export default function UploadSlot({
             // to the dialog element) is a child of this card, so a drop there
             // bubbles here — viewing is read-only and must not swap the file
             if (disabled || dialogRef.current?.open) return;
-            accept(e.dataTransfer.files?.[0]);
+            if (e.dataTransfer.files?.length) acceptDrop(e.dataTransfer.files);
           }}
           className={`rounded-xl border bg-white p-3 transition-colors ${
             dragging ? "border-blue-500 bg-blue-50" : "border-slate-200"
@@ -89,7 +113,13 @@ export default function UploadSlot({
             </div>
             <button
               type="button"
-              onClick={onClear}
+              onClick={() => {
+                // a multi-drop notice ("only X was loaded") must not outlive
+                // the file it describes — Remove empties the slot, so a
+                // lingering alert would be asserting a load that no longer exists
+                setRejected(null);
+                onClear();
+              }}
               disabled={disabled}
               className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-red-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600 disabled:opacity-50"
             >
@@ -190,7 +220,7 @@ export default function UploadSlot({
             e.preventDefault();
             setDragging(false);
             if (disabled) return;
-            accept(e.dataTransfer.files?.[0]);
+            if (e.dataTransfer.files?.length) acceptDrop(e.dataTransfer.files);
           }}
           className={`flex w-full flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed px-4 py-8 text-center transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600 disabled:opacity-50 ${
             dragging

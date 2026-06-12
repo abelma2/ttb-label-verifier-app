@@ -31,6 +31,7 @@ export const ERROR_SHORT: Record<string, string> = {
   connection: "no connection to service",
   network: "no connection to service",
   bad_response: "bad service reply — try again",
+  bad_image: "unreadable image file — re-export it",
   payload_too_large: "images too large",
   too_many_images: "too many files for one product",
   // API-side upload-validation kinds — never blame the photo READ for an

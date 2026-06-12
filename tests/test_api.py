@@ -243,6 +243,39 @@ def test_extraction_failure_maps_to_502(monkeypatch):
     assert body["message"] == api_index._FAILURE_RESPONSES["bad_response"][1]
 
 
+def test_unreadable_image_maps_to_400_bad_image(monkeypatch):
+    """A corrupt/truncated file whose intact header passed the magic-byte sniff
+    is rejected by the vision service with a 400 invalid-image error. That must
+    surface as a client-fixable 400 'bad_image' (re-export the photo), not the
+    retry-forever 'unknown' 500 that points the user at server logs."""
+    import httpx
+    from openai import BadRequestError
+
+    response = httpx.Response(
+        400, request=httpx.Request("POST", "https://api.openai.com/v1/chat/completions"))
+    exc = BadRequestError("Error code: 400 - invalid_image_format: image data could "
+                          "not be decoded", response=response, body=None)
+
+    def boom(images, media_type="image/png"):
+        raise exc
+
+    monkeypatch.setattr(api_index, "extract_fields", boom)
+    r = post_verify()
+    assert r.status_code == 400
+    body = r.json()["error"]
+    assert body["kind"] == "bad_image"
+    assert body["message"] == api_index._FAILURE_RESPONSES["bad_image"][1]
+    # a non-image 400 (bad params, policy) is OUR problem, never blamed on the photo
+    other = BadRequestError("Unsupported value for parameter 'foo'",
+                            response=response, body=None)
+    assert api_index.failure_kind(other) == "unknown"
+    # a 400 that merely MENTIONS images (a non-vision model rejecting image input —
+    # a server-side model misconfiguration) must not blame the user's file either
+    not_vision = BadRequestError("Invalid content type. image_url is only supported "
+                                 "by certain models.", response=response, body=None)
+    assert api_index.failure_kind(not_vision) == "unknown"
+
+
 def test_unexpected_crash_still_returns_error_envelope(monkeypatch):
     """A crash AFTER extraction (e.g. in verify()) must still produce the
     documented {error:{kind,message}} JSON envelope, not a text/plain 500."""
