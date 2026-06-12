@@ -32,8 +32,19 @@ GOVERNMENT_WARNING_HEADER = "GOVERNMENT WARNING"
 WARNING_WORDING_REVIEW_FLOOR = 90
 
 # Bold handling policy for the government warning. Modes:
-#   "medium_pass_gate" -- DEFAULT (since 2026-06-11, per course-staff guidance that the bold PASS
-#                    gate need not demand high confidence). 27 CFR 16.22 has TWO visual rules:
+#   "header_medium_gate" -- DEFAULT (since 2026-06-11, product decision): only the HEADER bold
+#                    rule gates the verdict. PASS when header_bold True at MEDIUM-or-high
+#                    confidence (on top of wording + ALL-CAPS); FAIL only on a HIGH-confidence
+#                    header_bold False; anything else (null / low, or a medium-confidence
+#                    violation) -> needs-review. body_bold is TRACKED -- a med/high-confidence
+#                    bold-body observation is appended to the reason as a note (and always stays
+#                    in the raw extraction) -- but it never decides pass/review/fail. Known cost:
+#                    an all-bold-body label with a bold header now PASSES; the two-rule gates
+#                    below were added precisely because the old header-only gate auto-passed ~93%
+#                    of all-bold-body violations, and accepting that gap again is the explicit
+#                    product call here (the note keeps the observation visible to reviewers).
+#   "medium_pass_gate" -- the prior default (2026-06-11, per course-staff guidance that the bold
+#                    PASS gate need not demand high confidence). 27 CFR 16.22 has TWO visual rules:
 #                    "GOVERNMENT WARNING" must be bold, AND the remainder/body may NOT be bold.
 #                    PASS when header_bold True AND body_bold False, each at MEDIUM-or-high
 #                    confidence (on top of wording + ALL-CAPS). FAIL stays strict -- only a
@@ -60,7 +71,7 @@ WARNING_WORDING_REVIEW_FLOOR = 90
 #                    ignoring confidence. Not recommended.
 # See BENCHMARK_NOTES.md (dev-archive branch; kept locally for dev) for the bold
 # experiments behind these choices.
-WARNING_BOLD_POLICY = os.environ.get("WARNING_BOLD_POLICY", "medium_pass_gate")
+WARNING_BOLD_POLICY = os.environ.get("WARNING_BOLD_POLICY", "header_medium_gate")
 
 # --- Fuzzy-match thresholds (0-100) for text fields (brand, class/type) -------
 #   score >= FUZZY_PASS          -> pass

@@ -61,7 +61,7 @@ vercel.json           Python function config (maxDuration)
 | --- | --- | --- |
 | `OPENAI_API_KEY` | yes | OpenAI **API platform** key (platform.openai.com, billing enabled — not a ChatGPT subscription) |
 | `EXTRACTION_MODEL` | no | override the vision model (default `gpt-5.4-mini`, chosen by a 5× stability benchmark) |
-| `WARNING_BOLD_POLICY` | no | bold-gate policy for the government warning (default `medium_pass_gate`; set `header_body_gate` for the stricter high-confidence-only PASS gate; see `config.py`) |
+| `WARNING_BOLD_POLICY` | no | bold-gate policy for the government warning (default `header_medium_gate` — header bold gates, body bold is a tracked note; set `medium_pass_gate` or `header_body_gate` for the stricter two-rule gates; see `config.py`) |
 
 The FastAPI layer reads the key from the environment only (`os.environ`). Locally, copy
 `.env.example` to `.env` (gitignored) and the dev servers load it for you; on Vercel, set
@@ -148,14 +148,15 @@ Rules are grounded in the three TTB Beverage Alcohol Manuals (cited in `config.p
 TTB's "Checklist of Mandatory Label Information" per class:
 
 - **Government warning** (27 CFR part 16) — exact wording; "GOVERNMENT WARNING" in caps
-  **and bold**, body **not** bold; "S"/"G" in Surgeon General capitalized. Wording and
-  caps are judged deterministically from the transcription; bold is confidence-gated
-  (`medium_pass_gate`): pass when both bold rules are confirmed at medium-or-high
-  confidence, fail only on a high-confidence violation, needs-review otherwise. Font-weight
-  detection from photos is unreliable (see `BENCHMARK_NOTES.md` on the `dev-archive`
-  branch), so a null/low-confidence
-  bold read never auto-passes, and a confident violation always fails. (The stricter
-  high-confidence-only PASS gate remains available: `WARNING_BOLD_POLICY=header_body_gate`.)
+  **and bold**; "S"/"G" in Surgeon General capitalized. Wording and caps are judged
+  deterministically from the transcription; header bold is confidence-gated
+  (`header_medium_gate`): pass when the bold header is confirmed at medium-or-high
+  confidence, fail only on a high-confidence not-bold header, needs-review otherwise.
+  Font-weight detection from photos is unreliable (see `BENCHMARK_NOTES.md` on the
+  `dev-archive` branch), so a null/low-confidence bold read never auto-passes. The
+  body-not-bold observation is recorded and surfaced to the reviewer as a note but does
+  not affect the verdict. (The stricter two-rule gates that also judge the body remain
+  available: `WARNING_BOLD_POLICY=medium_pass_gate` or `header_body_gate`.)
 - **Alcohol content** — class-dependent presence; bare "ABV" notation fails (not a TTB
   form); a proof inconsistent with the stated ABV fails.
 - **Wine appellation** — conditionally mandatory when the label shows a varietal,

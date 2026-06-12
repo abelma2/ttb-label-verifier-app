@@ -628,12 +628,12 @@ def _check_warning(gw) -> FieldResult:
         present, else fall back to the model's header_all_caps, with caps==False as a
         fail backstop;
       - require the "S" in Surgeon / "G" in General to be capitalized (all-caps is fine);
-      - judge BOLD per config.WARNING_BOLD_POLICY (default "medium_pass_gate": Pass/Review/Fail
-        on BOTH 27 CFR 16.22 visual rules -- the header must be bold AND the body/remainder must
-        NOT be bold. PASS when header_bold True AND body_bold False, each at medium-or-high
-        confidence; FAIL on a high-confidence violation of either (header not bold, or body bold);
-        anything else (null / low, or a medium-confidence violation) -> needs-review. header_bold
-        True by itself can never pass. The inline comment at the bold block documents all policies.)
+      - judge BOLD per config.WARNING_BOLD_POLICY (default "header_medium_gate": only the
+        HEADER rule gates -- PASS on header_bold True at medium-or-high confidence, FAIL only
+        on a high-confidence header_bold False, needs-review otherwise. body_bold is tracked
+        as a note on the reason but never decides the verdict. The two-rule gates that also
+        judge the body remain env-selectable; the inline comment at the bold block documents
+        all policies.)
     Title case fails and an unverifiable bold read goes to review; a near-miss wording read
     goes to needs-review; nothing non-exact ever auto-passes.
     """
@@ -685,11 +685,14 @@ def _check_warning(gw) -> FieldResult:
                                cause="caps")
 
     # Bold handling per config.WARNING_BOLD_POLICY (see config.py for the full description).
-    #   "medium_pass_gate" -> DEFAULT. Pass/Review/Fail on BOTH visual rules (27 CFR 16.22): the
-    #                    header must be bold AND the remainder/body must NOT be bold. The PASS gate
-    #                    accepts MEDIUM-or-high confidence; FAIL fires only on a HIGH-confidence
-    #                    violation. header_bold alone can never pass.
-    #   "header_body_gate" -> the stricter prior default (env-selectable): same two rules, but PASS
+    #   "header_medium_gate" -> DEFAULT. Only the HEADER rule gates: PASS on header_bold True at
+    #                    MEDIUM-or-high confidence; FAIL only on header_bold False at HIGH
+    #                    confidence; review otherwise. body_bold is a tracked note, never a gate.
+    #   "medium_pass_gate" -> prior default (env-selectable). Pass/Review/Fail on BOTH visual rules
+    #                    (27 CFR 16.22): the header must be bold AND the remainder/body must NOT be
+    #                    bold. The PASS gate accepts MEDIUM-or-high confidence; FAIL fires only on a
+    #                    HIGH-confidence violation. header_bold alone can never pass.
+    #   "header_body_gate" -> the stricter two-rule gate (env-selectable): same two rules, but PASS
     #                    requires HIGH confidence on both fields; medium-confidence reads -> review.
     #   "confidence_gate" -> fail-closed using header_bold + header_bold_confidence (header only);
     #   "trust_model"     -> judge from header_bold alone (ignores confidence);
@@ -697,11 +700,32 @@ def _check_warning(gw) -> FieldResult:
     #   "review"          -> hand every otherwise-valid warning to a human.
     # NOTE: the per-policy branches below intentionally repeat the PASS/_escalate + reason pattern.
     # That duplication is kept on purpose -- an explicit, auditable branch per policy is preferred
-    # over a DRY dispatch for this regulatory logic. medium_pass_gate (the 6th policy) deliberately
+    # over a DRY dispatch for this regulatory logic. medium_pass_gate deliberately
     # mirrors header_body_gate's structure rather than sharing a helper, so the two gates can be
     # diffed line-by-line; a shared PASS/escalate helper remains a deferred future cleanup.
     bold = gw.get("header_bold")
     bold_conf = gw.get("header_bold_confidence", "low")
+    if WARNING_BOLD_POLICY == "header_medium_gate":
+        # Only the HEADER rule gates the verdict. body_bold NEVER decides pass/review/fail --
+        # a med/high-confidence bold-body observation is appended to the reason as a note (and
+        # the raw extraction always carries it), so reviewers still see an all-bold body
+        # without it driving the verdict (explicit product decision, 2026-06-11).
+        body_note = ""
+        if gw.get("body_bold") is True and gw.get("body_bold_confidence") in ("medium", "high"):
+            body_note = (" (note: the warning body also reads as bold — recorded as an "
+                         "observation only; body bold does not affect this verdict)")
+        if bold is False and bold_conf == "high":
+            return FieldResult("government_warning", text, GOVERNMENT_WARNING, FAIL,
+                               f"'{GOVERNMENT_WARNING_HEADER}' does not appear to be in bold"
+                               + body_note, cause="bold")
+        if bold is True and bold_conf in ("medium", "high"):
+            result = FieldResult("government_warning", text, GOVERNMENT_WARNING, PASS,
+                                 "wording, capital letters, and bold header verified" + body_note,
+                                 cause="bold")
+            return _escalate(result, gw.get("confidence"))
+        return FieldResult("government_warning", text, GOVERNMENT_WARNING, REVIEW,
+                           f"could not confirm '{GOVERNMENT_WARNING_HEADER}' is in bold with at "
+                           f"least medium confidence — please verify" + body_note, cause="bold")
     if WARNING_BOLD_POLICY == "header_body_gate":
         # 27 CFR 16.22 has TWO visual rules: "GOVERNMENT WARNING" must be bold, and the remainder
         # may NOT be bold. Both must be confidently satisfied to PASS; a high-confidence violation
@@ -842,12 +866,12 @@ _UNVERIFIABLE_REASON = ("could not verify required label information from this i
 # reasons that mean "couldn't read it from this photo" (vs a definite, legible violation like
 # title case, clearly-wrong wording, or a HIGH-CONFIDENCE bold violation, which are NOT reframed).
 # NOTE: the confident bold-violation messages ("does not appear to be in bold" / "appears to be in
-# bold") are deliberately NOT listed here -- under both two-rule gates (medium_pass_gate, the
-# default, and header_body_gate) those only fire on a high-confidence determination, so they are
-# definite findings, not readability problems, and rewording them to "submit a clearer image"
-# would mislead the reviewer about the most important rule. The genuinely-unverifiable bold
-# outcomes still reframe via "could not confirm" / "could not verify that" (the two-rule gates'
-# REVIEW messages and confidence_gate's null/low fail-closed).
+# bold") are deliberately NOT listed here -- under the default header_medium_gate and both
+# two-rule gates (medium_pass_gate, header_body_gate) those only fire on a high-confidence
+# determination, so they are definite findings, not readability problems, and rewording them to
+# "submit a clearer image" would mislead the reviewer about the most important rule. The
+# genuinely-unverifiable bold outcomes still reframe via "could not confirm" / "could not verify
+# that" (the gates' REVIEW messages and confidence_gate's null/low fail-closed).
 _READABILITY_REASON_HINTS = (
     "not found on the label", "could not be read", "appears present but", "is unreadable",
     "could not verify that", "could not confirm", "close but not an exact match",
