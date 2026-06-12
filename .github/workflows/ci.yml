@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: python
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 3.12 matches the Vercel Python runtime.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      # Engine + API tests. Pure, no network — the model call is mocked.
+      - name: Run pytest
+        run: pytest
+
+  node:
+    name: node
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # >=22.6 required: test:web relies on Node's built-in type stripping.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      # Needs cdn.sheetjs.com reachable — xlsx is deliberately pinned to the
+      # CDN tarball (the npm registry's xlsx is frozen at 0.18.5 with known
+      # vulnerabilities). Do not switch it to the registry version.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Web tests
+        run: npm run test:web
+
+      - name: Type-check
+        run: npx tsc --noEmit
+
+      - name: Build
+        run: npm run build
