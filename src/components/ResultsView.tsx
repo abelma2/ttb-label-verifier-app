@@ -1,6 +1,6 @@
 import type { FieldVerdict, Status, VerifyResponse } from "@/lib/types";
 import { fieldLabel } from "@/lib/types";
-import { JsonReadout, OtherLabelDetails, WarningEvidence } from "./EvidencePanels";
+import { OtherLabelDetails } from "./EvidencePanels";
 import StatusPill from "./StatusPill";
 
 const BANNER: Record<Status, { title: string; className: string }> = {
@@ -166,13 +166,11 @@ export function ProductReport({
       </ul>
 
       <div className="mt-4 space-y-3">
-        <WarningEvidence extracted={result.extracted} />
         <OtherLabelDetails
           extracted={result.extracted}
           additionalStatements={result.additional_statements}
           imageQualityNotes={result.image_quality_notes}
         />
-        <JsonReadout extracted={result.extracted} />
       </div>
     </section>
   );
